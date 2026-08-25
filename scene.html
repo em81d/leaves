@@ -558,6 +558,9 @@
     leaves: 0,
     falling: [],
     litter: [],
+    // Leaves the model has dropped that have not let go on screen yet. See the
+    // note in stepDay.
+    pending: [],
     frostFlash: 0,     // decays over the day after a freeze night
     frostDays: 0,      // how much the meadow has cured
     weatherRng: null,
@@ -605,6 +608,7 @@
     sc.trees = [];
     sc.leaves = 0;
     sc.falling = [];
+    sc.pending = [];
     sc.litter = [];
 
     for (var i = 0; i < LAYOUT.length; i++) {
@@ -618,6 +622,7 @@
       t.swayPh = rng() * TAU;
       t.swayFr = 0.42 + rng() * 0.30;
       t.sway = 0;
+      t.z = i;                     // draw index = depth plane, back to front
       t.leaves = [];
       for (var s = 0; s < t.sites.length; s++) {
         var leaf = M.makeLeaf(L.sp, rng);
@@ -628,6 +633,11 @@
       sc.leaves += t.leaves.length;
       sc.trees.push(t);
     }
+
+    // One bucket per depth plane, plus one for "in front of everything". Reused
+    // every frame rather than reallocated.
+    sc.zbuckets = [];
+    for (var zb = 0; zb <= sc.trees.length; zb++) sc.zbuckets.push([]);
 
     // Meadow dressing, seeded so a replay of the same season looks identical.
     sc.tufts = [];
@@ -810,6 +820,7 @@
     // one day of playback should land exactly on that day's colours.
     sc.dayT = Math.min(1, sc.dayT + days);
     sc.snow.elevDrawn = ease(sc.snow.elevDrawn, sc.snow.elev, d, TAU_SNOW);
+    releasePending(d);
     sc.frostFlash = Math.max(0, sc.frostFlash - d * 0.42);
 
     // Wind breathes on top of the smoothed daily mean. A single eased number is
@@ -828,6 +839,7 @@
     sc.frostFlash = 0;
     sc.endHold = 0;
     sc.falling = [];
+    sc.pending = [];
     sc.litter = [];
     restampLitter();
     sc.weatherRng = M.makeRng(sc.seed ^ 0x9E3779B9);
@@ -841,6 +853,7 @@
         fresh.site = site;
         fresh.rgb = rgbOf(M.leafColor(fresh));
         fresh.rgbPrev = fresh.rgb;
+        fresh.pending = false;
         t.leaves[j] = fresh;
       }
     }
@@ -876,46 +889,20 @@
         leaf.rgbPrev = leaf.rgb;
         leaf.rgb = rgbOf(M.leafColor(leaf));
         if (!leaf.attached) {
-          // Detached this tick: hand it to the particle system at the exact
-          // point it was hanging, in world coordinates.
-          var s2 = leaf.site;
-          var wx = t.x + k * (s2.x * ct - s2.y * st);
-          var wy = t.y + k * (s2.x * st + s2.y * ct);
-          if (sc.falling.length >= MAX_FALLING) {
-            // Cap reached — a hundred leaves let go on the same simulated day.
-            // Put it on the ground directly rather than dropping it: the model
-            // says this leaf fell, so it has to be in the litter either way.
-            var quick = {
-              x: wx + (sc.leafRng() * 2 - 1) * 60,
-              y: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k,
-              rot: s2.rot, len: s2.len * k,
-              col: css(shade(mix(leaf.rgb, skyHz, t.haze * 0.7), 0.76)),
-              sp: t.species, squash: 0.30 + 0.22 * sc.leafRng()
-            };
-            if (sc.litter.length >= MAX_LITTER) sc.litter.shift();
-            sc.litter.push(quick);
-            stampLitter(quick);
-          } else {
-            sc.falling.push({
-              x: wx, y: wy,
-              vx: 0, vy: 6 + sc.leafRng() * 10,
-              rot: s2.rot, spin: (sc.leafRng() * 2 - 1) * 1.7,
-              ph: sc.leafRng() * TAU, fr: 0.8 + sc.leafRng() * 1.0,
-              len: s2.len * k, sp: t.species,
-              col: css(mix(leaf.rgb, skyHz, t.haze * 0.7)),
-              // Once it is lying in the litter a leaf is out of the light and
-              // damp, so it reads darker than it did on the branch.
-              litCol: css(shade(mix(leaf.rgb, skyHz, t.haze * 0.7), 0.76)),
-              // Spread the landing depth: a tight band of identical y is what
-              // makes a leaf drop look like a stripe painted under the tree.
-              land: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k,
-              drift: 0.6 + sc.leafRng() * 0.9,
-              // A standing lateral bias per leaf. Without it every leaf takes
-              // the same average path down and the carpet comes out as a bar
-              // painted under the crown instead of a drift.
-              bias: (sc.leafRng() * 2 - 1) * 42
-            });
-          }
+          /* The model has decided this leaf falls TODAY. It has not said when
+           * during the day, and a simulated day is 0.75 s of wall clock at 1x,
+           * so releasing every one of them on the frame the day ticks over made
+           * leaves arrive in a pulse — unnoticeable on an average day of forty,
+           * obvious on a peak day of five hundred.
+           *
+           * So the leaf is queued with a release time spread uniformly across
+           * the coming day, and — this is the part that matters — it stays drawn
+           * on its branch until that moment arrives. Hiding it at detach time and
+           * spawning the particle later would make the leaf wink out and reappear
+           * mid-air up to a day later, which is a worse artefact than the pulse.
+           * It has left the model's canopy but not the picture's. */
+          leaf.pending = true;
+          sc.pending.push({ leaf: leaf, tree: t, wait: sc.leafRng() });
         }
       }
     }
@@ -930,6 +917,85 @@
     sc.day++;
     refreshHud();
     return true;
+  }
+
+  /* --------------------------------------------------------------------------
+   * Release one queued leaf into the air. Position is recomputed here rather
+   * than remembered from detach time, so the leaf leaves from wherever its
+   * branch has swayed to by now, not from where it was a fraction of a day ago.
+   * ------------------------------------------------------------------------*/
+  function spawnFalling(t, leaf) {
+    var k = t.k, s2 = leaf.site;
+    var ct = Math.cos(t.sway), st = Math.sin(t.sway);
+    var wx = t.x + k * (s2.x * ct - s2.y * st);
+    var wy = t.y + k * (s2.x * st + s2.y * ct);
+
+    if (sc.falling.length >= MAX_FALLING) {
+      // Cap reached — hundreds of leaves in the air at once. Put this one on the
+      // ground directly rather than dropping it: the model says it fell, so it
+      // has to be in the litter either way.
+      var quick = {
+        x: wx + (sc.leafRng() * 2 - 1) * 60,
+        y: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k,
+        rot: s2.rot, len: s2.len * k,
+        col: css(shade(mix(leaf.rgb, skyHz, t.haze * 0.7), 0.76)),
+        sp: t.species, squash: 0.30 + 0.22 * sc.leafRng()
+      };
+      if (sc.litter.length >= MAX_LITTER) sc.litter.shift();
+      sc.litter.push(quick);
+      stampLitter(quick);
+      return;
+    }
+
+    /* Which depth plane this leaf falls in.
+     *
+     * Most of them stay in their own tree's plane, so a leaf shed by a hazed
+     * tree on the far bench passes BEHIND the foreground maple instead of over
+     * the front of it. A minority get blown toward the viewer and cross in front
+     * of nearer trees, which is the thing that actually happens in a gust and the
+     * reason this is a distribution rather than a constant. `advance` counts
+     * planes crossed; landing on sc.trees.length means in front of everything.
+     */
+    var r = sc.leafRng();
+    var advance = r < 0.60 ? 0 : r < 0.84 ? 1 : r < 0.95 ? 2 : 3;
+    var zPlane = Math.min(t.z + advance, sc.trees.length);
+    // Coming forward means coming closer: a little larger, a little more
+    // parallax, and a little less of the haze its tree was sitting in.
+    var near = 1 + 0.11 * advance;
+    var hz = Math.max(0, t.haze * (1 - 0.45 * advance));
+    sc.falling.push({
+      x: wx, y: wy, z: zPlane,
+      vx: 0, vy: 6 + sc.leafRng() * 10,
+      rot: s2.rot, spin: (sc.leafRng() * 2 - 1) * 1.7,
+      ph: sc.leafRng() * TAU, fr: 0.8 + sc.leafRng() * 1.0,
+      len: s2.len * k * near, sp: t.species,
+      col: css(mix(leaf.rgb, skyHz, hz * 0.7)),
+      // Once it is lying in the litter a leaf is out of the light and damp, so
+      // it reads darker than it did on the branch.
+      litCol: css(shade(mix(leaf.rgb, skyHz, hz * 0.7), 0.76)),
+      // Spread the landing depth: a tight band of identical y is what makes a
+      // leaf drop look like a stripe painted under the tree.
+      land: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k + 26 * advance,
+      drift: (0.6 + sc.leafRng() * 0.9) * near,
+      // A standing lateral bias per leaf. Without it every leaf takes the same
+      // average path down and the carpet comes out as a bar painted under the
+      // crown instead of a drift.
+      bias: (sc.leafRng() * 2 - 1) * 42 * near
+    });
+  }
+
+  // Let go of every queued leaf whose moment has come. `days` is simulated days
+  // elapsed, so the spread holds at any playback speed.
+  function releasePending(days) {
+    var q = sc.pending;
+    for (var i = q.length - 1; i >= 0; i--) {
+      var it = q[i];
+      it.wait -= days;
+      if (it.wait > 0) continue;
+      it.leaf.pending = false;
+      spawnFalling(it.tree, it.leaf);
+      q.splice(i, 1);
+    }
   }
 
   /* ==========================================================================
@@ -1272,7 +1338,7 @@
       var hr = skyHz[0], hg = skyHz[1], hb = skyHz[2];
       for (var j = 0; j < lv.length; j++) {
         var lf = lv[j];
-        if (!lf.attached) continue;
+        if (!lf.attached && !lf.pending) continue;
         var a = lf.rgbPrev, b = lf.rgb;
         var r = a[0] + (b[0] - a[0]) * mixT;
         var g = a[1] + (b[1] - a[1]) * mixT;
@@ -1364,7 +1430,9 @@
     var swing = 0.05 + windF * 0.52;                  // amplitude, not rate
     for (var j = 0; j < leaves.length; j++) {
       var leaf = leaves[j];
-      if (!leaf.attached) continue;
+      // `pending` leaves have been dropped by the model but have not let go on
+      // screen yet, so they are still hanging there.
+      if (!leaf.attached && !leaf.pending) continue;
       var s2 = leaf.site;
       // Position along the wind, in world units, so the wave crosses the whole
       // scene coherently rather than each tree flapping independently.
@@ -1387,9 +1455,9 @@
     }
   }
 
-  function drawFalling() {
-    for (var i = 0; i < sc.falling.length; i++) {
-      var p = sc.falling[i];
+  function drawFalling(list) {
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i];
       var tw = 0.35 + 0.65 * Math.abs(Math.cos(p.ph * 1.1));
       var cp = Math.cos(p.rot), sp = Math.sin(p.rot);
       var wl = p.len * tw, hl = p.len;
@@ -1552,8 +1620,23 @@
     drawShadows();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(litCv, 0, 0);              // the accumulated leaf carpet
-    for (var j = 0; j < sc.trees.length; j++) drawTree(sc.trees[j]);
-    drawFalling();
+
+    // Falling leaves are interleaved with the trees by depth plane. Drawing them
+    // all afterwards put every airborne leaf in front of every trunk, so a leaf
+    // shed by a hazed tree on the far bench crossed the front of the foreground
+    // maple — which reads as the background tree being nearer than the tree it
+    // is behind.
+    var zb = sc.zbuckets;
+    for (var b = 0; b < zb.length; b++) zb[b].length = 0;
+    for (var f = 0; f < sc.falling.length; f++) {
+      var pf = sc.falling[f];
+      zb[pf.z < zb.length ? pf.z : zb.length - 1].push(pf);
+    }
+    for (var j = 0; j < sc.trees.length; j++) {
+      drawTree(sc.trees[j]);
+      if (zb[j].length) drawFalling(zb[j]);   // in front of this tree, behind the next
+    }
+    if (zb[zb.length - 1].length) drawFalling(zb[zb.length - 1]);
     drawWeather();
 
     requestAnimationFrame(frame);
@@ -1605,7 +1688,8 @@
       for (var j = 0; j < lv.length; j++) if (lv[j].attached) held++;
     }
     el('perf').textContent = sc.leaves + ' leaves simulated · ' + held +
-      ' on the branch · ' + sc.litter.length + ' in the litter · ' +
+      ' on the branch · ' + sc.falling.length + ' in the air · ' +
+      sc.litter.length + ' in the litter · ' +
       fps.toFixed(0) + ' fps' +
       (qualityStep ? ' · rendering at ' + Math.round(QUALITY[qualityStep] * 100) +
                      '% scale to hold the frame rate' : '');
@@ -1788,10 +1872,18 @@
       // Fast-forward the model, not the clock: every intervening day is really
       // simulated, so the leaves arrive with the history they should have.
       var target = clamp(parseInt(p.day, 10) || 0, 0, M.SEASON_DAYS);
-      while (sc.day < target && stepDay()) { /* run the season forward */ }
-      // Drop the leaves that fell on the way — nothing should be mid-air on a
-      // still, and the litter belongs on the ground.
-      for (var g = 0; g < 400 && sc.falling.length; g++) stepFalling(1 / 30);
+      // Release each day's leaves as that day passes. stepDay only QUEUES them
+      // now, and the queue is normally drained from advanceVis, which the frame
+      // loop drives — nothing is driving it here, so without this the whole
+      // season's worth of dropped leaves would still be hanging on the branches.
+      while (sc.day < target && stepDay()) releasePending(1);
+      // Settle the leaves that fell on the way, so the litter is on the ground
+      // rather than raining down all at once. `air` settles only briefly instead,
+      // leaving a drift of leaves spread through the air at mixed heights —
+      // which is what a still of a real leaf-fall day looks like, and the only
+      // way to inspect how airborne leaves are ordered against the trees.
+      var settle = p.air ? 55 : 400;
+      for (var g = 0; g < settle && sc.falling.length; g++) stepFalling(1 / 30);
       // The smoothed weather has to catch up too. Easing from day 0 would paint
       // August light and a bare skyline over an October canopy.
       resetVis();
