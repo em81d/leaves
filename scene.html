@@ -1,0 +1,1280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wasatch Fall — a scene driven by the leaf model</title>
+<style>
+  :root {
+    --ink: #f2ece2;
+    --dim: #b3a795;
+    --glass: rgba(20, 17, 14, 0.58);
+    --line: rgba(242, 236, 226, 0.14);
+    --accent: #e0a251;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #0d1014; color: var(--ink);
+    font: 12.5px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .hud { position: fixed; z-index: 2; }
+  .card {
+    background: var(--glass); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 13px; backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+    box-shadow: 0 6px 26px rgba(0,0,0,.30);
+  }
+  code { font-size: 11px; opacity: .9; }
+
+  /* ---------- top-left: title + the day's weather ---------- */
+  #title { top: 16px; left: 16px; max-width: 322px; }
+  #title h1 { margin: 0 0 3px; font-size: 14px; font-weight: 650; letter-spacing: .2px; }
+  #title .who { color: var(--dim); font-size: 11px; margin: 0 0 10px; }
+  #date { display: flex; align-items: baseline; gap: 9px; margin-bottom: 9px; }
+  #date .d { font-size: 21px; font-weight: 650; letter-spacing: .3px; }
+  #date .n { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .env { display: grid; grid-template-columns: auto auto; gap: 3px 16px; font-size: 11.5px; }
+  .env span:nth-child(odd) { color: var(--dim); }
+  .env span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .05em;
+  }
+  .badge.frost  { background: #2b4b6b; color: #d5e9ff; }
+  .badge.freeze { background: #6b2b33; color: #ffdde1; }
+  .badge.none   { background: rgba(255,255,255,.07); color: var(--dim); }
+
+  /* ---------- top-right: per-species canopy state ---------- */
+  #legend { top: 16px; right: 16px; min-width: 216px; }
+  .panel-h {
+    margin: 0 0 9px; font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--dim); font-weight: 650;
+  }
+  .sp { display: grid; grid-template-columns: 13px 1fr auto; gap: 8px; align-items: center; }
+  .sp + .sp { margin-top: 7px; }
+  .sw {
+    width: 13px; height: 13px; border-radius: 3px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.35);
+    transition: background-color .3s linear;
+  }
+  .sp .nm { font-size: 11.5px; white-space: nowrap; }
+  .sp .st { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  /* ---------- bottom: transport ---------- */
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); }
+  #bar .card { display: flex; align-items: center; gap: 12px; padding: 9px 12px; }
+  button {
+    background: rgba(255,255,255,.07); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(255,255,255,.14); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 650; }
+  button.primary:hover { filter: brightness(1.08); }
+  #prog { width: 200px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.13); overflow: hidden; }
+  #prog i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .spd { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11px; }
+  input[type=range] { accent-color: var(--accent); }
+  .spd input { width: 84px; }
+  .spd b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* ---------- right: weather controls ---------- */
+  #panel { top: 132px; right: 16px; width: 246px; display: none; }
+  #panel.open { display: block; }
+  .ctl { margin-bottom: 11px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 11.5px; }
+  .ctl label b { color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { width: 100%; margin: 0; }
+  .hr { height: 1px; background: var(--line); margin: 12px 0; }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; }
+  .chk { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11.5px; margin-top: 10px; }
+  .chk input { accent-color: var(--accent); }
+  .foot { color: var(--dim); font-size: 10.5px; margin: 11px 0 0; line-height: 1.5; }
+  .k { display: inline-block; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; font-size: 10px; }
+
+  @media (max-width: 780px) {
+    #legend { display: none; }
+    #title { max-width: 240px; }
+    #prog { width: 90px; }
+    .spd { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="hud" id="title">
+  <div class="card">
+    <h1>Wasatch Fall</h1>
+    <p class="who">Bigtooth maple &middot; Gambel oak &middot; Quaking aspen &mdash; every leaf on every tree stepped by <code>model.js</code></p>
+    <div id="date"><span class="d" id="oDate">Aug 1</span><span class="n" id="oDay">day 0 / 120</span></div>
+    <div class="env">
+      <span>Night low</span><span id="oTmin">&mdash;</span>
+      <span>Daylength</span><span id="oLen">&mdash;</span>
+      <span>Sunlight</span><span id="oSun">&mdash;</span>
+      <span>Gust</span><span id="oGust">&mdash;</span>
+      <span>Overnight</span><span id="oFrost">&mdash;</span>
+      <span>Canopy held</span><span id="oHeld">&mdash;</span>
+    </div>
+  </div>
+</div>
+
+<div class="hud" id="legend">
+  <div class="card">
+    <div class="panel-h">Canopy state</div>
+    <div id="spList"></div>
+  </div>
+</div>
+
+<div class="hud" id="panel">
+  <div class="card">
+    <div class="panel-h">Season environment</div>
+    <div class="ctl"><label for="temp"><span>Temperature</span><b id="tempV">0.0 &deg;C</b></label>
+      <input type="range" id="temp" min="-6" max="6" step="0.5" value="0"></div>
+    <div class="ctl"><label for="winterPrecip"><span>Winter precip (Jan&ndash;Mar)</span><b id="winterPrecipV">1.00 &times;</b></label>
+      <input type="range" id="winterPrecip" min="0.3" max="1.8" step="0.05" value="1"></div>
+    <div class="ctl"><label for="cloud"><span>Cloud cover</span><b id="cloudV">25 %</b></label>
+      <input type="range" id="cloud" min="0" max="100" step="1" value="25"></div>
+    <div class="ctl"><label for="wind"><span>Mean wind</span><b id="windV">3.0 m/s</b></label>
+      <input type="range" id="wind" min="0" max="12" step="0.25" value="3"></div>
+    <div class="ctl"><label for="precip"><span>In-season rain</span><b id="precipV">1.00 &times;</b></label>
+      <input type="range" id="precip" min="0" max="3" step="0.05" value="1"></div>
+    <div class="ctl"><label for="lat"><span>Latitude</span><b id="latV">40.6 &deg;N</b></label>
+      <input type="range" id="lat" min="30" max="46" step="0.5" value="40.65"></div>
+    <div class="hr"></div>
+    <div class="panel-h">Scene</div>
+    <div class="ctl"><label for="dens"><span>Leaf density</span><b id="densV">1.00 &times;</b></label>
+      <input type="range" id="dens" min="0.3" max="1.6" step="0.05" value="1"></div>
+    <div class="row">
+      <button id="reseed">New woods</button>
+      <button id="replay">Replay season</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="loopSeason" checked> Loop into a new season</label>
+    <p class="foot" id="perf">&mdash;</p>
+    <p class="foot">Weather takes effect going forward &mdash; a leaf already brown does not go back.<br>
+      <span class="k">Space</span> play &nbsp; <span class="k">&rarr;</span> step a day &nbsp; <span class="k">C</span> controls</p>
+  </div>
+</div>
+
+<div class="hud" id="bar">
+  <div class="card">
+    <button class="primary" id="play">Pause</button>
+    <button id="stepBtn">Step</button>
+    <div id="prog"><i id="progFill"></i></div>
+    <div class="spd"><span>speed</span><input type="range" id="speed" min="0.25" max="6" step="0.25" value="1"><b id="speedV">1.0&times;</b></div>
+    <button id="cfg">Controls</button>
+  </div>
+</div>
+
+<script src="model.js"></script>
+<script>
+/* ============================================================================
+ * PHASE 4 — the real visualization. Rendering only.
+ *
+ * Everything biological comes from model.js and nothing is re-decided here:
+ * every leaf in the scene is a model leaf, advanced one simulated day at a time
+ * by M.stepLeaf() against a single shared M.makeEnvironment() day, and painted
+ * with M.leafColor(). This file owns geometry, wind, and light — the model owns
+ * colour, senescence and abscission.
+ *
+ * Deliberate deviation from plan.md Phase 4: plain canvas 2D instead of p5.js.
+ * The only thing p5 was wanted for was organic shapes and particle motion, both
+ * of which are a few dozen lines here, and dropping the CDN keeps the scene
+ * openable straight off the filesystem with no network.
+ * ==========================================================================*/
+(function () {
+  'use strict';
+
+  var M = window.LeafModel;
+  var clamp = M.clamp;
+  var TAU = Math.PI * 2;
+
+  /* ==========================================================================
+   * 0. WORLD SPACE
+   *
+   * The composition is authored in a fixed 1600x900 world and scaled to cover
+   * the window, anchored to the bottom so the leaf litter is never cropped.
+   * ========================================================================*/
+  var W = 1600, H = 900;
+  var HORIZON = 668;          // where the meadow meets the ridge
+  var cv = document.getElementById('c');
+  var ctx = cv.getContext('2d');
+  var S = 1, OX = 0, OY = 0;  // world -> device matrix (uniform scale + offset)
+
+  // Fallen leaves never move again, so the litter is its own layer: each leaf is
+  // stamped once when it lands and the whole carpet costs one blit per frame.
+  // Without this, a late-season ground covered in a few thousand leaves would be
+  // re-filling every one of them 60 times a second for no visible reason.
+  var litCv = document.createElement('canvas');
+  var litCtx = litCv.getContext('2d');
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var cw = window.innerWidth, ch = window.innerHeight;
+    cv.width = Math.round(cw * dpr);
+    cv.height = Math.round(ch * dpr);
+    S = Math.max(cw / W, ch / H) * dpr;
+    OX = (cw * dpr - W * S) / 2;
+    OY = ch * dpr - H * S;    // bottom-anchored: crop sky, never the ground
+    litCv.width = cv.width;
+    litCv.height = cv.height;
+    restampLitter();          // the layer is resolution-bound; rebuild it
+  }
+
+  function world() { ctx.setTransform(S, 0, 0, S, OX, OY); }
+
+  /* ==========================================================================
+   * 1. COLOUR HELPERS
+   * ========================================================================*/
+  function rgbOf(str) {                       // 'rgb(r,g,b)' -> [r,g,b]
+    var i = str.indexOf('(') + 1;
+    var p = str.slice(i, -1).split(',');
+    return [+p[0], +p[1], +p[2]];
+  }
+  function mix(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+  function css(c) {
+    return 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+  }
+  function cssA(c, a) {
+    return 'rgba(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ',' + a + ')';
+  }
+  function shade(c, f) { return [c[0] * f, c[1] * f, c[2] * f]; }
+
+  /* ==========================================================================
+   * 2. LEAF SILHOUETTES
+   *
+   * One Path2D per species in unit space: petiole at the origin, tip at y = -1,
+   * so a leaf is drawn by putting its length into the transform. Reusing three
+   * Path2D objects for a few thousand leaves is what keeps the fill loop cheap.
+   * ========================================================================*/
+  function polyPath(pts) {
+    var p = new Path2D();
+    p.moveTo(pts[0][0], pts[0][1]);
+    for (var i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]);
+    p.closePath();
+    return p;
+  }
+
+  // Palmate, five lobes with deep sinuses — Acer grandidentatum.
+  function maplePath() {
+    var lobes = [
+      { a: -1.30, r: 0.62 }, { a: -0.95, r: 0.34 },
+      { a: -0.72, r: 0.92 }, { a: -0.38, r: 0.44 },
+      { a:  0.00, r: 1.00 },
+      { a:  0.38, r: 0.44 }, { a:  0.72, r: 0.92 },
+      { a:  0.95, r: 0.34 }, { a:  1.30, r: 0.62 }
+    ];
+    var pts = [[0, -0.06]];
+    for (var i = 0; i < lobes.length; i++) {
+      var a = lobes[i].a, r = lobes[i].r;
+      pts.push([Math.sin(a) * r * 0.82, -Math.cos(a) * r - 0.06]);
+    }
+    return polyPath(pts);
+  }
+
+  // Pinnately lobed oblong — Quercus gambelii, deep rounded sinuses.
+  // n is kept low on purpose: these are filled a few thousand times a frame, so
+  // outline resolution is a frame-budget decision, not a fidelity one.
+  function oakPath() {
+    var right = [], left = [], n = 14;
+    for (var i = 0; i <= n; i++) {
+      var t = i / n;
+      var w = 0.40 * Math.pow(Math.sin(Math.PI * t), 0.45) *
+              (0.70 + 0.30 * Math.cos(7 * Math.PI * t));
+      right.push([w, -t]);
+      left.unshift([-w, -t]);
+    }
+    return polyPath(right.concat(left));
+  }
+
+  // Near-circular with a short point — Populus tremuloides.
+  function aspenPath() {
+    var right = [], left = [], n = 11;
+    for (var i = 0; i <= n; i++) {
+      var t = i / n;
+      var w = 0.46 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.88)), 0.62);
+      right.push([w, -t]);
+      left.unshift([-w, -t]);
+    }
+    return polyPath(right.concat(left));
+  }
+
+  var LEAF_PATH = {
+    bigtoothMaple: maplePath(),
+    gambelOak: oakPath(),
+    aspen: aspenPath()
+  };
+
+  /* ==========================================================================
+   * 3. TREE ARCHITECTURE
+   *
+   * Recursive branching, one config block per species so the three read as three
+   * different trees at a glance and not as one tree at three scales. Same idea
+   * as the model's species table: parameters, not branching logic.
+   *   maple  — single bole, high fork, broad rounded crown
+   *   oak    — several crooked stems from the root crown, low and wide (Gambel
+   *            oak forms clonal thickets, so it is drawn as one)
+   *   aspen  — tall straight white bole, short upswept limbs on the top half
+   * ========================================================================*/
+  // `depth` x `kids` sets the tip count and therefore the leaf budget, which is
+  // the whole frame cost: tips ~ avg(kids)^(depth-1) per limb. These numbers are
+  // chosen to land the whole scene near 3.5k simulated leaves at density 1.
+  var TREE = {
+    bigtoothMaple: {
+      trunk: 168, trunkW: 19, forkAt: 0.60, stems: 1, limbs: [3, 4],
+      depth: 5, kids: [2, 3], spread: 0.60, lenF: 0.78, widF: 0.63,
+      crook: 0.16, up: 0.10, minW: 1.0,
+      leafLen: 21, perTip: 4, cluster: 0.70, along: 0.75,
+      bark: [66, 56, 50], barkLight: [96, 82, 72]
+    },
+    gambelOak: {
+      trunk: 96, trunkW: 15, forkAt: 0.42, stems: 3, limbs: [3, 3],
+      depth: 4, kids: [2, 3], spread: 0.80, lenF: 0.78, widF: 0.62,
+      crook: 0.40, up: 0.02, minW: 0.9,
+      leafLen: 18, perTip: 3, cluster: 0.70, along: 0.7,
+      bark: [63, 55, 48], barkLight: [92, 82, 71]
+    },
+    aspen: {
+      trunk: 300, trunkW: 13, forkAt: 0.98, stems: 1, limbs: [1, 1],
+      depth: 5, kids: [2, 2], spread: 0.46, lenF: 0.66, widF: 0.56,
+      crook: 0.10, up: 0.30, minW: 0.6,
+      leafLen: 14, perTip: 4, cluster: 0.82, along: 0.55,
+      bark: [214, 213, 200], barkLight: [238, 237, 226]
+    }
+  };
+
+  function jit(rng, v, f) { return v * (1 + (rng() * 2 - 1) * f); }
+
+  // Leaf sites: a cluster at the tip, plus a scatter along the last few twigs,
+  // so the crown has interior depth instead of a hollow shell.
+  function addSites(out, spec, rng, x1, y1, x2, y2, len, count) {
+    for (var i = 0; i < count; i++) {
+      var t = 0.35 + 0.65 * rng();
+      var bx = x1 + (x2 - x1) * t, by = y1 + (y2 - y1) * t;
+      var a = rng() * TAU, r = spec.cluster * len * Math.sqrt(rng());
+      out.sites.push({
+        x: bx + Math.cos(a) * r,
+        // Never below the root crown: a leaf at ground level looks like litter
+        // that forgot to fall.
+        y: Math.min(-6, by + Math.sin(a) * r * 0.85),
+        len: jit(rng, spec.leafLen * out.boost, 0.30),
+        // Leaves hang and face every which way; bias downward.
+        rot: Math.PI + (rng() * 2 - 1) * 1.5,
+        ph: rng() * TAU,
+        fr: 1.5 + rng() * 1.7,          // flutter frequency
+        tw: rng() * TAU,                // twist phase
+        fl: 0.5 + rng() * 0.9           // flutter gain
+      });
+    }
+  }
+
+  function branch(out, spec, rng, x, y, ang, len, wid, depth, dens) {
+    // A low limb aimed downward walks straight into the meadow, which reads as a
+    // stray stick lying on the grass. Mirror it about horizontal — same side of
+    // the tree, sweeping up instead of down. Limbs high in the crown keep their
+    // droop, because that is where droop belongs.
+    if (Math.sin(ang) > 0.05 && y > -0.42 * spec.trunk) ang = -ang;
+
+    var x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
+    out.branches.push({ x1: x, y1: y, x2: x2, y2: y2, w: wid, d: depth });
+
+    var tip = depth >= spec.depth || wid < spec.minW;
+    if (tip || depth >= spec.depth - 1) {
+      var n = Math.round(spec.perTip * dens * (tip ? 1 : spec.along) * (0.6 + 0.8 * rng()));
+      if (n > 0) addSites(out, spec, rng, x, y, x2, y2, len, n);
+    }
+    if (tip) return;
+
+    var kids = spec.kids[0] + ((rng() * (spec.kids[1] - spec.kids[0] + 1)) | 0);
+    for (var i = 0; i < kids; i++) {
+      // One child keeps the parent line; the rest peel off to alternating sides.
+      var off = i === 0
+        ? (rng() * 2 - 1) * spec.spread * 0.32
+        : (i % 2 ? 1 : -1) * spec.spread * (0.62 + 0.55 * rng());
+      var a = ang + off + (rng() * 2 - 1) * spec.crook;
+      // Phototropism: limbs bend back toward vertical as they thin out.
+      a += (-Math.PI / 2 - a) * spec.up * (1 - Math.cos(off));
+      branch(out, spec, rng, x2, y2, a,
+             len * jit(rng, spec.lenF, 0.20),
+             wid * spec.widF, depth + 1, dens);
+    }
+  }
+
+  // dens scales the leaf COUNT, boost scales each leaf's SIZE. A hazed tree on
+  // the far bench gets fewer, bigger leaves: the crown still reads as a solid
+  // mass at that distance, and nothing is spent simulating detail that lands
+  // inside one device pixel.
+  function buildTree(species, seed, dens, boost) {
+    var spec = TREE[species];
+    var rng = M.makeRng(seed);
+    var out = { branches: [], sites: [], spec: spec, species: species, boost: boost || 1 };
+
+    var stems = spec.stems;
+    for (var s = 0; s < stems; s++) {
+      // Multi-stem species lean their stems apart from the root crown.
+      var lean = stems === 1 ? 0 : ((s / (stems - 1)) * 2 - 1) * 0.30 + (rng() * 2 - 1) * 0.07;
+      var x0 = stems === 1 ? 0 : lean * 22;
+      var len = jit(rng, spec.trunk * (stems === 1 ? 1 : 0.82 + 0.3 * rng()), 0.08);
+      var wid = spec.trunkW * (stems === 1 ? 1 : 0.72);
+
+      if (species === 'aspen') {
+        // Straight bole in segments, short upswept limbs off the top half only.
+        var segs = 7, x = x0, y = 0, ang = -Math.PI / 2 + lean * 0.5;
+        for (var i = 0; i < segs; i++) {
+          var sl = len / segs;
+          var nx = x + Math.cos(ang) * sl, ny = y + Math.sin(ang) * sl;
+          out.branches.push({ x1: x, y1: y, x2: nx, y2: ny,
+                              w: wid * (1 - 0.55 * (i / segs)), d: 0 });
+          if (i >= 2) {
+            var limbs = i >= 4 ? 2 : 1;
+            for (var k = 0; k < limbs; k++) {
+              var side = (i + k) % 2 ? 1 : -1;
+              var la = ang + side * (0.85 - 0.32 * (i / segs)) + (rng() * 2 - 1) * 0.12;
+              branch(out, spec, rng, nx, ny, la,
+                     len * (0.20 + 0.13 * rng()) * (1 - 0.35 * (i / segs)),
+                     wid * 0.34, 1, dens);
+            }
+          }
+          ang += (rng() * 2 - 1) * 0.045;
+          x = nx; y = ny;
+        }
+      } else {
+        // Bole up to the fork, then a scaffold of limbs.
+        var bx = x0, by = 0, ba = -Math.PI / 2 + lean * 0.55;
+        var boleSegs = 3, boleLen = len * spec.forkAt;
+        for (var b = 0; b < boleSegs; b++) {
+          var nx2 = bx + Math.cos(ba) * (boleLen / boleSegs);
+          var ny2 = by + Math.sin(ba) * (boleLen / boleSegs);
+          out.branches.push({ x1: bx, y1: by, x2: nx2, y2: ny2,
+                              w: wid * (1 - 0.22 * (b / boleSegs)), d: 0 });
+          ba += (rng() * 2 - 1) * spec.crook * 0.5;
+          bx = nx2; by = ny2;
+        }
+        var limbN = spec.limbs[0] + ((rng() * (spec.limbs[1] - spec.limbs[0] + 1)) | 0);
+        for (var m = 0; m < limbN; m++) {
+          var frac = limbN === 1 ? 0.5 : m / (limbN - 1);
+          var a2 = ba + (frac * 2 - 1) * spec.spread * 1.25 + (rng() * 2 - 1) * 0.12;
+          branch(out, spec, rng, bx, by, a2,
+                 len * (1 - spec.forkAt) * (1.5 + 0.5 * rng()),
+                 wid * 0.72, 1, dens);
+        }
+      }
+    }
+
+    // Bark blotches: aspen scarring, and a hint of texture on the others.
+    out.marks = [];
+    var mk = species === 'aspen' ? 9 : 4;
+    for (var q = 0; q < mk; q++) {
+      out.marks.push({
+        x: (rng() * 2 - 1) * spec.trunkW * 0.30,
+        y: -rng() * spec.trunk * (species === 'aspen' ? 0.85 : spec.forkAt),
+        rx: spec.trunkW * (0.10 + 0.20 * rng()),
+        ry: spec.trunkW * (0.05 + 0.22 * rng()),
+        a: rng() * 0.6 - 0.3
+      });
+    }
+
+    var top = 0;
+    for (var t2 = 0; t2 < out.sites.length; t2++) top = Math.min(top, out.sites[t2].y);
+    out.height = -top || 1;
+    return out;
+  }
+
+  /* ==========================================================================
+   * 4. THE COMPOSITION
+   *
+   * Nine trees. Aspens clumped in the left third (they are clonal — a lone
+   * aspen is the unusual case), the focal bigtooth maple on the right third
+   * where the crown can fill the upper corner, Gambel oak thickets low and
+   * wide in between, and hazed miniatures of each on the far bench for depth.
+   * `haze` is atmospheric perspective: how far the tree's colours get pulled
+   * toward the sky before they are drawn.
+   * ========================================================================*/
+  var LAYOUT = [
+    // --- far bench, strongly hazed -----------------------------------------
+    { sp: 'aspen',         x: 1298, y: 688, k: 0.36, haze: 0.46, seed: 91 },
+    { sp: 'aspen',         x: 1352, y: 692, k: 0.32, haze: 0.50, seed: 92 },
+    { sp: 'gambelOak',     x: 1470, y: 700, k: 0.42, haze: 0.44, seed: 93 },
+    { sp: 'bigtoothMaple', x: 132,  y: 702, k: 0.40, haze: 0.42, seed: 94 },
+    // --- mid ground ---------------------------------------------------------
+    { sp: 'aspen',         x: 250,  y: 742, k: 0.72, haze: 0.30, seed: 21 },
+    { sp: 'aspen',         x: 336,  y: 754, k: 0.86, haze: 0.22, seed: 22 },
+    { sp: 'aspen',         x: 424,  y: 736, k: 0.64, haze: 0.34, seed: 23 },
+    { sp: 'gambelOak',     x: 736,  y: 762, k: 0.60, haze: 0.24, seed: 31 },
+    { sp: 'bigtoothMaple', x: 872,  y: 748, k: 0.50, haze: 0.30, seed: 41 },
+    // --- foreground ---------------------------------------------------------
+    { sp: 'aspen',         x: 372,  y: 812, k: 1.02, haze: 0.06, seed: 24 },
+    { sp: 'gambelOak',     x: 648,  y: 858, k: 1.00, haze: 0.00, seed: 32 },
+    { sp: 'bigtoothMaple', x: 1046, y: 868, k: 1.14, haze: 0.00, seed: 42 }
+  ];
+
+  /* ==========================================================================
+   * 5. SCENE STATE
+   * ========================================================================*/
+  var sc = {
+    controls: Object.assign({}, M.DEFAULT_CONTROLS),
+    dens: 1,
+    seed: 7,
+    day: 0,
+    doy: M.START_DOY,
+    env: null,
+    trees: [],
+    leaves: 0,
+    falling: [],
+    litter: [],
+    frostFlash: 0,     // decays over the day after a freeze night
+    windNow: 3,        // smoothed gust, drives sway
+    frostDays: 0,      // how much the meadow has cured
+    weatherRng: null,
+    leafRng: null,
+    endHold: 0
+  };
+
+  var SKY = {
+    clearTop:  [ 74, 138, 196], clearHz: [204, 226, 234],
+    cloudTop:  [116, 126, 136], cloudHz: [182, 184, 186],
+    warmHz:    [236, 192, 142]
+  };
+  var MAX_FALLING = 1400, MAX_LITTER = 5000;
+
+  function buildScene() {
+    var rng = M.makeRng(sc.seed ^ 0x5bf03635);
+    sc.trees = [];
+    sc.leaves = 0;
+    sc.falling = [];
+    sc.litter = [];
+
+    for (var i = 0; i < LAYOUT.length; i++) {
+      var L = LAYOUT[i];
+      var d = sc.dens * (L.k < 0.5 ? 0.26 : L.k < 0.9 ? 0.56 : 1);
+      // The size boost is for the far bench only. Applied to the mid-ground it
+      // flattens the perspective: a tree half the height should not be carrying
+      // leaves the same size as the one in front of it.
+      var t = buildTree(L.sp, sc.seed * 977 + L.seed, d, 1 + 0.50 * L.haze);
+      t.x = L.x; t.y = L.y; t.k = L.k; t.haze = L.haze;
+      t.swayPh = rng() * TAU;
+      t.swayFr = 0.42 + rng() * 0.30;
+      t.sway = 0;
+      t.leaves = [];
+      for (var s = 0; s < t.sites.length; s++) {
+        var leaf = M.makeLeaf(L.sp, rng);
+        leaf.site = t.sites[s];
+        leaf.rgb = rgbOf(M.leafColor(leaf));
+        t.leaves.push(leaf);
+      }
+      sc.leaves += t.leaves.length;
+      sc.trees.push(t);
+    }
+
+    // Meadow dressing, seeded so a replay of the same season looks identical.
+    sc.tufts = [];
+    for (var g = 0; g < 900; g++) {
+      var ty = HORIZON + Math.pow(rng(), 0.55) * (H - HORIZON + 40);
+      sc.tufts.push({
+        x: rng() * (W + 80) - 40, y: ty,
+        h: 4 + (ty - HORIZON) / (H - HORIZON) * 20 * (0.5 + rng()),
+        lean: (rng() * 2 - 1) * 0.5, ph: rng() * TAU
+      });
+    }
+    sc.ridge = ridgeLine(M.makeRng(sc.seed ^ 0x1f83d9ab), 0.6, 585, 105);
+    sc.ridge2 = ridgeLine(M.makeRng(sc.seed ^ 0x2c1b3a77), 1.0, 640, 58);
+    sc.conifers = [];
+    for (var cf = 0; cf < 110; cf++) {
+      var cx = rng() * (W + 60) - 30;
+      sc.conifers.push({ x: cx, y: HORIZON - 2 + rng() * 14, h: 30 + rng() * 52 });
+    }
+    resetSeason();
+  }
+
+  function ridgeLine(rng, rough, base, amp) {
+    var pts = [], n = 30;
+    for (var i = 0; i <= n; i++) {
+      var t = i / n;
+      var y = base
+        - Math.sin(t * Math.PI * 0.9 + 0.4) * amp
+        - Math.sin(t * 7.1 + rng() * 6) * amp * 0.16 * rough
+        - Math.sin(t * 15.7 + rng() * 6) * amp * 0.07 * rough;
+      pts.push([t * (W + 60) - 30, y]);
+    }
+    return pts;
+  }
+
+  function resetSeason() {
+    sc.day = 0;
+    sc.doy = M.START_DOY;
+    sc.frostDays = 0;
+    sc.frostFlash = 0;
+    sc.endHold = 0;
+    sc.falling = [];
+    sc.litter = [];
+    restampLitter();
+    sc.weatherRng = M.makeRng(sc.seed ^ 0x9E3779B9);
+    sc.leafRng = M.makeRng(sc.seed ^ 0x85EBCA6B);
+    var lrng = M.makeRng(sc.seed ^ 0x27d4eb2d);
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      for (var j = 0; j < t.leaves.length; j++) {
+        var site = t.leaves[j].site;
+        var fresh = M.makeLeaf(t.species, lrng);
+        fresh.site = site;
+        fresh.rgb = rgbOf(M.leafColor(fresh));
+        t.leaves[j] = fresh;
+      }
+    }
+    sc.env = M.makeEnvironment(sc.doy, sc.controls, M.makeRng(sc.seed ^ 0xC2B2AE35));
+    sc.windNow = sc.env.gust;
+    refreshHud();
+  }
+
+  /* ==========================================================================
+   * 6. ONE SIMULATED DAY
+   *
+   * One environment for the whole scene — the trees share a sky, which is the
+   * point of putting them in the same picture. Then every leaf is stepped, and
+   * any leaf the model detached this day becomes a falling particle carrying
+   * the colour it had when it let go.
+   * ========================================================================*/
+  function stepDay() {
+    if (sc.day >= M.SEASON_DAYS) return false;
+    sc.doy = M.START_DOY + sc.day;
+    var env = sc.env = M.makeEnvironment(sc.doy, sc.controls, sc.weatherRng);
+
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i], k = t.k;
+      var ct = Math.cos(t.sway), st = Math.sin(t.sway);
+      for (var j = 0; j < t.leaves.length; j++) {
+        var leaf = t.leaves[j];
+        if (!leaf.attached) continue;
+        M.stepLeaf(leaf, env, sc.leafRng);
+        leaf.rgb = rgbOf(M.leafColor(leaf));
+        if (!leaf.attached) {
+          // Detached this tick: hand it to the particle system at the exact
+          // point it was hanging, in world coordinates.
+          var s2 = leaf.site;
+          var wx = t.x + k * (s2.x * ct - s2.y * st);
+          var wy = t.y + k * (s2.x * st + s2.y * ct);
+          if (sc.falling.length >= MAX_FALLING) {
+            // Cap reached — a hundred leaves let go on the same simulated day.
+            // Put it on the ground directly rather than dropping it: the model
+            // says this leaf fell, so it has to be in the litter either way.
+            var quick = {
+              x: wx + (sc.leafRng() * 2 - 1) * 60,
+              y: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k,
+              rot: s2.rot, len: s2.len * k,
+              col: css(shade(mix(leaf.rgb, skyHz, t.haze * 0.7), 0.76)),
+              sp: t.species, squash: 0.30 + 0.22 * sc.leafRng()
+            };
+            if (sc.litter.length >= MAX_LITTER) sc.litter.shift();
+            sc.litter.push(quick);
+            stampLitter(quick);
+          } else {
+            sc.falling.push({
+              x: wx, y: wy,
+              vx: 0, vy: 6 + sc.leafRng() * 10,
+              rot: s2.rot, spin: (sc.leafRng() * 2 - 1) * 2.6,
+              ph: sc.leafRng() * TAU, fr: 1.1 + sc.leafRng() * 1.5,
+              len: s2.len * k, sp: t.species,
+              col: css(mix(leaf.rgb, skyHz, t.haze * 0.7)),
+              // Once it is lying in the litter a leaf is out of the light and
+              // damp, so it reads darker than it did on the branch.
+              litCol: css(shade(mix(leaf.rgb, skyHz, t.haze * 0.7), 0.76)),
+              // Spread the landing depth: a tight band of identical y is what
+              // makes a leaf drop look like a stripe painted under the tree.
+              land: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k,
+              drift: 0.6 + sc.leafRng() * 0.9,
+              // A standing lateral bias per leaf. Without it every leaf takes
+              // the same average path down and the carpet comes out as a bar
+              // painted under the crown instead of a drift.
+              bias: (sc.leafRng() * 2 - 1) * 42
+            });
+          }
+        }
+      }
+    }
+
+    if (env.hardFreeze) { sc.frostFlash = 1; sc.frostDays += 1.6; }
+    else if (env.lightFrost) { sc.frostFlash = 0.5; sc.frostDays += 0.7; }
+
+    sc.day++;
+    refreshHud();
+    return true;
+  }
+
+  /* ==========================================================================
+   * 7. PARTICLES — flutter down, then lie in the litter
+   * ========================================================================*/
+  function stepFalling(dt) {
+    var wind = sc.windNow;
+    for (var i = sc.falling.length - 1; i >= 0; i--) {
+      var p = sc.falling[i];
+      // Terminal velocity, not free fall: a leaf is mostly drag.
+      p.vy += (74 - p.vy) * Math.min(1, dt * 1.6);
+      p.ph += dt * p.fr;
+      // Aerodynamic tumble: sideways sweep in phase with the flutter, plus the
+      // day's wind pushing downwind.
+      p.vx = Math.sin(p.ph) * 34 * p.drift + wind * 5.2 + p.bias;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.rot += p.spin * dt * (0.5 + 0.5 * Math.cos(p.ph));
+
+      if (p.y >= p.land) {
+        var lay = {
+          x: p.x, y: p.land, rot: p.rot, len: p.len, col: p.litCol, sp: p.sp,
+          squash: 0.30 + 0.22 * (0.5 + 0.5 * Math.sin(p.ph * 7.7))
+        };
+        // Past the cap the oldest leaves are forgotten, but they stay on the
+        // layer — nobody can tell, and it keeps the carpet from thinning out.
+        if (sc.litter.length >= MAX_LITTER) sc.litter.shift();
+        sc.litter.push(lay);
+        stampLitter(lay);
+        sc.falling.splice(i, 1);
+      } else if (p.x < -120 || p.x > W + 120) {
+        sc.falling.splice(i, 1);
+      }
+    }
+  }
+
+  /* ==========================================================================
+   * 8. LIGHT — sky, ridge, meadow
+   *
+   * The light is the model's, not a hand-drawn ramp: env.sun is the clear-sky
+   * insolation index (1.0 at the solstice, ~0.45 by early November) attenuated
+   * by the cloud slider, so the scene genuinely dims as the season runs out.
+   * ========================================================================*/
+  var skyTop = SKY.clearTop.slice(), skyHz = SKY.clearHz.slice(), sunF = 1;
+
+  function computeLight() {
+    var e = sc.env;
+    var cloud = clamp(sc.controls.cloudCover / 100, 0, 1);
+    sunF = clamp(e.sun, 0, 1);
+    // env.sun runs ~0.90 in August down to ~0.35 by late November, and it is
+    // relative insolation, not brightness: a November afternoon is dimmer and
+    // lower-contrast than an August one, not four times darker. So the light
+    // multiplier only spans 0.80-1.0 and the seasonal signal is carried mostly
+    // by the warm low-sun horizon and the vignette.
+    var bright = 0.80 + 0.20 * sunF;
+    var wet = clamp(e.rain / 20, 0, 1);
+
+    skyTop = shade(mix(SKY.clearTop, SKY.cloudTop, Math.pow(cloud, 0.8)), bright * (1 - 0.22 * wet));
+    skyHz = shade(mix(SKY.clearHz, SKY.cloudHz, Math.pow(cloud, 0.7)), bright * (1 - 0.18 * wet));
+    // Low sun runs warm along the horizon; overcast kills it.
+    var warm = (1 - sunF) * 1.05 * (1 - cloud * 0.85);
+    skyHz = mix(skyHz, SKY.warmHz, clamp(warm, 0, 0.62));
+  }
+
+  function drawSky() {
+    var g = ctx.createLinearGradient(0, -OY / S, 0, HORIZON);
+    g.addColorStop(0, css(shade(skyTop, 0.88)));
+    g.addColorStop(0.62, css(skyTop));
+    g.addColorStop(1, css(skyHz));
+    ctx.fillStyle = g;
+    ctx.fillRect(-40, -OY / S - 10, W + 80, HORIZON + OY / S + 12);
+
+    // Sun: sinks toward the ridge as the daylength collapses.
+    var cloud = clamp(sc.controls.cloudCover / 100, 0, 1);
+    var sy = 150 + (1 - sunF) * 360;
+    var glow = ctx.createRadialGradient(1180, sy, 6, 1180, sy, 260);
+    var gi = (1 - cloud * 0.82) * (0.30 + 0.34 * sunF);
+    glow.addColorStop(0, 'rgba(255,246,222,' + (gi * 1.5).toFixed(3) + ')');
+    glow.addColorStop(0.22, 'rgba(255,232,186,' + (gi * 0.5).toFixed(3) + ')');
+    glow.addColorStop(1, 'rgba(255,226,180,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(880, sy - 280, 600, 560);
+
+    // Cloud banks: count, opacity and colour all come off the cloud slider, so
+    // 0% is an empty desert sky and 100% is a solid overcast.
+    var n = Math.round(cloud * 11);
+    if (n) {
+      ctx.save();
+      var rng = M.makeRng(sc.seed ^ 0x517cc1b7);
+      // Drift downwind at a rate the wind slider actually sets.
+      var drift = tNow * sc.controls.windMean * 2.6;
+      var span = W + 700;
+      for (var i = 0; i < n; i++) {
+        var cx = rng() * span;
+        var cy = 40 + rng() * 330;
+        var cw = 150 + rng() * 320, chh = 20 + rng() * 30;
+        var puffs = 7 + ((rng() * 5) | 0);
+        var seedA = rng() * 10, base = ((cx + drift) % span) - 300;
+        // Each puff is a radial gradient rather than a hard ellipse: a stack of
+        // flat discs reads as a cartoon, a stack of soft ones reads as vapour.
+        var tone = mix(skyHz, [255, 255, 255], 0.62 - 0.42 * cloud);
+        var peak = 0.12 + 0.20 * cloud;
+        for (var b = 0; b < puffs; b++) {
+          var u = puffs > 1 ? b / (puffs - 1) : 0.5;   // 0..1 along the bank
+          var taper = Math.sin(Math.PI * u) * 0.85 + 0.15;
+          var px = base + (u - 0.5) * cw;
+          var py = cy + Math.sin(seedA + b * 1.7) * chh * 0.30 + (1 - taper) * chh * 0.55;
+          var rx = cw * 0.15 * (0.5 + taper), ry = chh * (0.40 + 0.60 * taper);
+          var g2 = ctx.createRadialGradient(px, py, 0, px, py, rx);
+          g2.addColorStop(0, cssA(tone, peak));
+          g2.addColorStop(0.55, cssA(tone, peak * 0.62));
+          g2.addColorStop(1, cssA(tone, 0));
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.scale(1, ry / rx);                       // squash into a flat bank
+          ctx.translate(-px, -py);
+          ctx.fillStyle = g2;
+          ctx.fillRect(px - rx, py - rx, rx * 2, rx * 2);
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+    }
+  }
+
+  // tint is aerial perspective: the further ridge is pulled harder toward the
+  // horizon colour, which is what makes it read as further away and not just
+  // as a lighter mountain.
+  function drawRidge(pts, tint, coniferBand) {
+    var col = mix(mix([58, 68, 86], skyHz, tint), skyTop, 0.12);
+    ctx.fillStyle = css(col);
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (var i = 1; i < pts.length; i++) {
+      var p = pts[i], q = pts[i - 1];
+      ctx.quadraticCurveTo(q[0], q[1], (p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
+    }
+    ctx.lineTo(W + 40, HORIZON + 10);
+    ctx.lineTo(-40, HORIZON + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    if (coniferBand) {
+      // A dark conifer belt along the bench — the evergreen counterpoint that
+      // makes the deciduous colour read as colour.
+      ctx.fillStyle = css(mix([32, 50, 43], skyHz, 0.22));
+      for (var c = 0; c < sc.conifers.length; c++) {
+        var t = sc.conifers[c];
+        ctx.beginPath();
+        ctx.moveTo(t.x, t.y - t.h);
+        ctx.lineTo(t.x + t.h * 0.20, t.y);
+        ctx.lineTo(t.x - t.h * 0.20, t.y);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawMeadow() {
+    // Cure the grass with accumulated frost, not with the calendar.
+    var cure = clamp(sc.frostDays / 9, 0, 1);
+    var near = mix([78, 100, 50], [150, 126, 72], cure);
+    var far = mix([100, 120, 72], [164, 144, 95], cure);
+    var lit = 0.62 + 0.38 * sunF;
+    near = shade(near, lit); far = shade(far, lit);
+
+    var g = ctx.createLinearGradient(0, HORIZON - 6, 0, H + 40);
+    g.addColorStop(0, css(mix(far, skyHz, 0.26)));
+    g.addColorStop(0.10, css(far));
+    g.addColorStop(1, css(shade(near, 0.86)));
+    ctx.fillStyle = g;
+    ctx.fillRect(-40, HORIZON - 8, W + 80, H - HORIZON + 60);
+
+    var sway = Math.sin(tNow * 1.5) * clamp(sc.windNow / 9, 0, 1);
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    for (var i = 0; i < sc.tufts.length; i++) {
+      var t = sc.tufts[i];
+      var dep = clamp((t.y - HORIZON) / (H - HORIZON), 0, 1);
+      ctx.strokeStyle = cssA(shade(mix(far, near, dep), 0.72), 0.32 + 0.3 * dep);
+      var lean = t.lean + sway * (1.4 + Math.sin(t.ph)) * (0.4 + dep);
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.quadraticCurveTo(t.x + lean * t.h * 0.4, t.y - t.h * 0.6,
+                           t.x + lean * t.h, t.y - t.h);
+      ctx.stroke();
+    }
+  }
+
+  /* ==========================================================================
+   * 9. TREES AND LEAVES
+   *
+   * Leaves are filled with setTransform rather than save/translate/rotate/
+   * restore: the tree transform is folded into each leaf matrix by hand, which
+   * is what makes a few thousand independently-simulated leaves affordable at
+   * 60 fps.
+   * ========================================================================*/
+  function drawTree(t) {
+    var k = t.k, sw = t.sway;
+    var ct = Math.cos(sw), st = Math.sin(sw);
+    var A = S * k;
+
+    // --- branches, in tree-local space ------------------------------------
+    ctx.setTransform(A * ct, A * st, -A * st, A * ct, OX + S * t.x, OY + S * t.y);
+    var dark = mix(t.spec.bark, skyHz, t.haze);
+    var light = mix(t.spec.barkLight, skyHz, t.haze);
+    var lit2 = 0.68 + 0.32 * sunF;
+    ctx.lineCap = 'round';
+    for (var i = 0; i < t.branches.length; i++) {
+      var b = t.branches[i];
+      ctx.strokeStyle = css(shade(mix(dark, light, clamp(1 - b.d / 4, 0, 1) * 0.55), lit2));
+      ctx.lineWidth = Math.max(0.35, b.w);
+      ctx.beginPath();
+      ctx.moveTo(b.x1, b.y1);
+      ctx.lineTo(b.x2, b.y2);
+      ctx.stroke();
+    }
+    // Aspen scars / bark texture.
+    ctx.fillStyle = cssA(shade(mix([58, 58, 52], skyHz, t.haze), lit2), 0.55);
+    for (var m = 0; m < t.marks.length; m++) {
+      var mk = t.marks[m];
+      ctx.beginPath();
+      ctx.ellipse(mk.x, mk.y, mk.rx, mk.ry, mk.a, 0, TAU);
+      ctx.fill();
+    }
+
+    // --- leaves ------------------------------------------------------------
+    var path = LEAF_PATH[t.species];
+    var windF = clamp(sc.windNow / 10, 0, 1);
+    // Quaking aspen earns its name: flattened petiole, so its leaves twist far
+    // more than the other two in the same breeze.
+    var twistGain = t.species === 'aspen' ? 0.80 : 0.42;
+    var leaves = t.leaves;
+    for (var j = 0; j < leaves.length; j++) {
+      var leaf = leaves[j];
+      if (!leaf.attached) continue;
+      var s2 = leaf.site;
+      var flut = (0.06 + windF * 0.55) * s2.fl * Math.sin(tNow * s2.fr * (0.7 + windF) + s2.ph);
+      var phi = s2.rot + flut;
+      var cp = Math.cos(sw + phi), sp = Math.sin(sw + phi);
+      // Twist about the petiole, seen edge-on as a horizontal squeeze.
+      var tw = 1 - twistGain * windF * (0.5 + 0.5 * Math.sin(tNow * s2.fr * 1.7 + s2.tw));
+      var wl = s2.len * tw, hl = s2.len;
+      var c = t.haze ? css(mix(leaf.rgb, skyHz, t.haze)) : css(leaf.rgb);
+      ctx.setTransform(A * cp * wl, A * sp * wl, -A * sp * hl, A * cp * hl,
+                       OX + S * (t.x + k * (s2.x * ct - s2.y * st)),
+                       OY + S * (t.y + k * (s2.x * st + s2.y * ct)));
+      ctx.fillStyle = c;
+      ctx.fill(path);
+    }
+  }
+
+  function drawFalling() {
+    for (var i = 0; i < sc.falling.length; i++) {
+      var p = sc.falling[i];
+      var tw = 0.35 + 0.65 * Math.abs(Math.cos(p.ph * 1.6));
+      var cp = Math.cos(p.rot), sp = Math.sin(p.rot);
+      var wl = p.len * tw, hl = p.len;
+      ctx.setTransform(S * cp * wl, S * sp * wl, -S * sp * hl, S * cp * hl,
+                       OX + S * p.x, OY + S * p.y);
+      ctx.fillStyle = p.col;
+      ctx.fill(LEAF_PATH[p.sp]);
+    }
+  }
+
+  function stampLitter(p) {
+    var cp = Math.cos(p.rot), sp = Math.sin(p.rot);
+    var wl = p.len, hl = p.len * p.squash;     // lying flat, seen at a glance
+    litCtx.setTransform(S * cp * wl, S * sp * wl, -S * sp * hl, S * cp * hl,
+                        OX + S * p.x, OY + S * p.y);
+    litCtx.fillStyle = p.col;
+    litCtx.fill(LEAF_PATH[p.sp]);
+  }
+
+  function restampLitter() {
+    litCtx.setTransform(1, 0, 0, 1, 0, 0);
+    litCtx.clearRect(0, 0, litCv.width, litCv.height);
+    if (!sc.litter) return;
+    for (var i = 0; i < sc.litter.length; i++) stampLitter(sc.litter[i]);
+  }
+
+  function drawWeather() {
+    var e = sc.env;
+    world();
+    if (e.rain > 0.5) {
+      var n = Math.min(300, Math.round(e.rain * 14));
+      ctx.strokeStyle = 'rgba(214,228,240,0.17)';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      for (var i = 0; i < n; i++) {
+        // Deterministic per-frame streaks: cheap, and no per-drop bookkeeping.
+        var sx = ((i * 137.13 + tNow * 90) % (W + 200)) - 100;
+        var sy = ((i * 311.7 + tNow * 1250) % (H + 200)) - 100;
+        var lean = sc.windNow * 1.6;
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx + lean, sy + 26);
+      }
+      ctx.stroke();
+    }
+    if (sc.frostFlash > 0.01) {
+      var a = sc.frostFlash * 0.16;
+      var g = ctx.createLinearGradient(0, H, 0, HORIZON - 120);
+      g.addColorStop(0, 'rgba(198,224,255,' + a.toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(198,224,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(-40, HORIZON - 130, W + 80, H - HORIZON + 180);
+    }
+    // Warm-cool vignette, keyed to the seasonal light.
+    var vg = ctx.createRadialGradient(W * 0.5, H * 0.42, H * 0.30, W * 0.5, H * 0.45, H * 0.95);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(12,14,20,' + (0.08 + 0.13 * (1 - sunF)).toFixed(3) + ')');
+    ctx.fillStyle = vg;
+    ctx.fillRect(-40, -OY / S - 10, W + 80, H + 80);
+  }
+
+  /* ==========================================================================
+   * 10. FRAME
+   * ========================================================================*/
+  var tNow = 0, lastT = 0, acc = 0, playing = true, still = false;
+  var DAYS_PER_SEC_AT_1X = M.SEASON_DAYS / 90;   // a season in 90 s at 1x
+
+  function frame(ms) {
+    var real = lastT ? Math.min((ms - lastT) / 1000, 0.1) : 0;
+    lastT = ms;
+    // ?still freezes the clock but keeps repainting, so a headless capture has
+    // a committed frame to grab and nothing moves between attempts.
+    var dt = still ? 0 : real;
+    tNow += dt;
+    perfTick(real);
+
+    // Wind: chase the day's gust so a windy day visibly moves the canopy.
+    sc.windNow += (sc.env.gust - sc.windNow) * Math.min(1, dt * 0.9);
+    sc.frostFlash = Math.max(0, sc.frostFlash - dt * 0.22);
+
+    if (playing) {
+      acc += dt * DAYS_PER_SEC_AT_1X * parseFloat(el('speed').value);
+      var guard = 0;
+      while (acc >= 1 && guard++ < 8) {
+        acc -= 1;
+        if (!stepDay()) break;
+      }
+      if (sc.day >= M.SEASON_DAYS) {
+        sc.endHold += dt;
+        if (sc.endHold > 4 && el('loopSeason').checked) {
+          sc.seed = (sc.seed * 1664525 + 1013904223) >>> 0;
+          buildScene();
+        }
+      }
+    }
+    stepFalling(dt);
+
+    // --- paint, back to front ---------------------------------------------
+    computeLight();
+    var swayAmp = clamp(sc.windNow / 11, 0, 1);
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      t.sway = (0.004 + 0.020 * swayAmp) *
+               (Math.sin(tNow * t.swayFr + t.swayPh) +
+                0.35 * Math.sin(tNow * t.swayFr * 2.7 + t.swayPh * 1.7));
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    world();
+    drawSky();
+    drawRidge(sc.ridge, 0.66, false);
+    drawRidge(sc.ridge2, 0.34, true);
+    drawMeadow();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(litCv, 0, 0);              // the accumulated leaf carpet
+    for (var j = 0; j < sc.trees.length; j++) drawTree(sc.trees[j]);
+    drawFalling();
+    drawWeather();
+
+    requestAnimationFrame(frame);
+  }
+
+  // Frame cost, reported in the controls panel: the leaf density slider buys
+  // canopy at a measurable price and it should be visible what that price is.
+  var perfAcc = 0, perfN = 0;
+  function perfTick(real) {
+    if (!real) return;
+    perfAcc += real; perfN++;
+    if (perfN < 45) return;
+    var fps = perfN / perfAcc;
+    perfAcc = 0; perfN = 0;
+    var held = 0;
+    for (var i = 0; i < sc.trees.length; i++) {
+      var lv = sc.trees[i].leaves;
+      for (var j = 0; j < lv.length; j++) if (lv[j].attached) held++;
+    }
+    el('perf').textContent = sc.leaves + ' leaves simulated · ' + held +
+      ' on the branch · ' + sc.litter.length + ' in the litter · ' +
+      fps.toFixed(0) + ' fps';
+  }
+
+  /* ==========================================================================
+   * 11. HUD
+   * ========================================================================*/
+  function el(id) { return document.getElementById(id); }
+
+  function speciesStats() {
+    var acc2 = {};
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      var a = acc2[t.species] || (acc2[t.species] = { n: 0, held: 0, r: 0, g: 0, b: 0, sen: 0 });
+      for (var j = 0; j < t.leaves.length; j++) {
+        var leaf = t.leaves[j];
+        a.n++;
+        if (leaf.attached) {
+          a.held++;
+          a.r += leaf.rgb[0]; a.g += leaf.rgb[1]; a.b += leaf.rgb[2];
+          a.sen += leaf.senescence;
+        }
+      }
+    }
+    return acc2;
+  }
+
+  function refreshHud() {
+    var e = sc.env;
+    el('oDate').textContent = M.doyToLabel(sc.doy);
+    el('oDay').textContent = 'day ' + sc.day + ' / ' + M.SEASON_DAYS;
+    el('oTmin').textContent = e.tMin.toFixed(1) + ' °C';
+    el('oLen').textContent = e.dayLength.toFixed(2) + ' h';
+    el('oSun').textContent = e.swMeanWm2 + ' W/m²';
+    el('oGust').textContent = e.gust.toFixed(1) + ' m/s';
+    el('oFrost').innerHTML = e.hardFreeze
+      ? '<span class="badge freeze">HARD FREEZE</span>'
+      : e.lightFrost ? '<span class="badge frost">frost</span>'
+                     : '<span class="badge none">clear</span>';
+
+    var st = speciesStats(), html = '', held = 0, tot = 0;
+    var order = ['aspen', 'bigtoothMaple', 'gambelOak'];
+    for (var i = 0; i < order.length; i++) {
+      var k = order[i], a = st[k];
+      if (!a) continue;
+      held += a.held; tot += a.n;
+      var d = a.held || 1;
+      var sw = a.held
+        ? 'rgb(' + Math.round(a.r / d) + ',' + Math.round(a.g / d) + ',' + Math.round(a.b / d) + ')'
+        : 'rgba(255,255,255,.10)';
+      html += '<div class="sp"><span class="sw" style="background:' + sw + '"></span>' +
+              '<span class="nm">' + M.SPECIES[k].name + '</span>' +
+              '<span class="st">' + Math.round(100 * a.held / a.n) + '% held' +
+              (a.held ? ' · sen ' + (a.sen / d).toFixed(2) : '') + '</span></div>';
+    }
+    el('spList').innerHTML = html;
+    el('oHeld').textContent = tot ? Math.round(100 * held / tot) + ' %' : '—';
+    el('progFill').style.width = (100 * sc.day / M.SEASON_DAYS).toFixed(1) + '%';
+  }
+
+  /* ---------------------------------------------------------------- controls */
+  var ctlIds = ['temp', 'winterPrecip', 'cloud', 'wind', 'precip', 'lat', 'dens'];
+
+  function pushControls() {
+    sc.controls.tempOffset = parseFloat(el('temp').value);
+    sc.controls.cloudCover = parseFloat(el('cloud').value);
+    sc.controls.windMean = parseFloat(el('wind').value);
+    sc.controls.precipMult = parseFloat(el('precip').value);
+    sc.controls.winterPrecip = parseFloat(el('winterPrecip').value);
+    sc.controls.latitude = parseFloat(el('lat').value);
+  }
+
+  function labels() {
+    var tv = parseFloat(el('temp').value);
+    el('tempV').textContent = (tv >= 0 ? '+' : '') + tv.toFixed(1) + ' °C';
+    el('cloudV').textContent = el('cloud').value + ' %';
+    el('windV').textContent = parseFloat(el('wind').value).toFixed(1) + ' m/s';
+    el('precipV').textContent = parseFloat(el('precip').value).toFixed(2) + ' ×';
+    el('winterPrecipV').textContent = parseFloat(el('winterPrecip').value).toFixed(2) + ' ×';
+    el('latV').textContent = parseFloat(el('lat').value).toFixed(1) + ' °N';
+    el('densV').textContent = parseFloat(el('dens').value).toFixed(2) + ' ×';
+    el('speedV').textContent = parseFloat(el('speed').value).toFixed(2) + '×';
+  }
+
+  ctlIds.forEach(function (id) {
+    el(id).addEventListener('input', function () {
+      labels();
+      if (id === 'dens') {
+        sc.dens = parseFloat(el('dens').value);
+        pushControls();
+        buildScene();                 // geometry changed; rebuild the woods
+        return;
+      }
+      pushControls();
+      // Before the season opens, re-seed day 0 so the readouts (daylength in
+      // particular) answer the new settings straight away.
+      if (sc.day === 0) {
+        sc.env = M.makeEnvironment(sc.doy, sc.controls, M.makeRng(sc.seed ^ 0xC2B2AE35));
+        refreshHud();
+      }
+    });
+  });
+  el('speed').addEventListener('input', labels);
+
+  function setPlaying(v) {
+    playing = v;
+    el('play').textContent = v ? 'Pause' : 'Play';
+  }
+  el('play').addEventListener('click', function () { setPlaying(!playing); });
+  el('stepBtn').addEventListener('click', function () { setPlaying(false); stepDay(); });
+  el('replay').addEventListener('click', function () { acc = 0; resetSeason(); setPlaying(true); });
+  el('reseed').addEventListener('click', function () {
+    acc = 0;
+    sc.seed = (sc.seed * 1664525 + 1013904223) >>> 0;
+    buildScene();
+    setPlaying(true);
+  });
+  el('cfg').addEventListener('click', function () { el('panel').classList.toggle('open'); });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+    if (ev.code === 'Space') { ev.preventDefault(); setPlaying(!playing); }
+    else if (ev.code === 'ArrowRight') { ev.preventDefault(); setPlaying(false); stepDay(); }
+    else if (ev.code === 'KeyC') el('panel').classList.toggle('open');
+  });
+
+  window.addEventListener('resize', resize);
+
+  /* ==========================================================================
+   * 12. QUERY STRING
+   *
+   * ?day=62&seed=9&paused=1&temp=-2&cloud=70 ... — a specific day of a specific
+   * season is reproducible from a URL, which is how a still gets captured and
+   * how two settings get compared side by side.
+   * ========================================================================*/
+  // Returns true if it took over scene construction.
+  function applyQuery() {
+    var q = window.location.search;
+    if (!q || q.length < 2) return false;
+    var p = {};
+    q.slice(1).split('&').forEach(function (kv) {
+      var i = kv.indexOf('=');
+      p[decodeURIComponent(i < 0 ? kv : kv.slice(0, i))] = i < 0 ? '1' : decodeURIComponent(kv.slice(i + 1));
+    });
+    var sliders = { temp: 'temp', winterPrecip: 'winterPrecip', cloud: 'cloud',
+                    wind: 'wind', precip: 'precip', lat: 'lat', dens: 'dens',
+                    speed: 'speed' };
+    Object.keys(sliders).forEach(function (k) {
+      if (p[k] != null && isFinite(parseFloat(p[k]))) el(sliders[k]).value = parseFloat(p[k]);
+    });
+    if (p.seed != null && isFinite(parseFloat(p.seed))) sc.seed = parseFloat(p.seed) >>> 0;
+    sc.dens = parseFloat(el('dens').value);
+    labels();
+    pushControls();
+    buildScene();
+    if (p.day != null) {
+      // Fast-forward the model, not the clock: every intervening day is really
+      // simulated, so the leaves arrive with the history they should have.
+      var target = clamp(parseInt(p.day, 10) || 0, 0, M.SEASON_DAYS);
+      while (sc.day < target && stepDay()) { /* run the season forward */ }
+      // Drop the leaves that fell on the way — nothing should be mid-air on a
+      // still, and the litter belongs on the ground.
+      for (var g = 0; g < 400 && sc.falling.length; g++) stepFalling(1 / 30);
+    }
+    if (p.paused) setPlaying(false);
+    if (p.still) { setPlaying(false); still = true; }
+    if (p.controls) el('panel').classList.add('open');
+    return true;
+  }
+
+  /* ------------------------------------------------------------------ start */
+  resize();
+  labels();
+  pushControls();
+  if (!applyQuery()) buildScene();
+  computeLight();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

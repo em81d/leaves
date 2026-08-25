@@ -5,12 +5,13 @@ A science-driven, interactive visualization of deciduous leaves changing color a
 
 **Development approach:** build the biological/environmental model FIRST as pure logic (no rendering), validate it with a minimal grid-of-colored-squares prototype, THEN invest in a polished visual layer. Do not skip ahead to visuals before the model behaves correctly.
 
-**Status:** Phases 1 and 2 complete. Phase 3 partially complete — see the phase list. 40 automated checks passing.
+**Status:** Phases 1, 2 and 4 complete. Phase 3 partially complete — see the phase list. 40 automated checks passing.
 
 | File | Role |
 |---|---|
 | `model.js` | Phase 1. Pure logic, no DOM. Runs in browser and Node. |
 | `index.html` | Phase 2. Grid prototype + sliders. Open directly, no build step. |
+| `scene.html` | Phase 4. The visualization: a canvas fall scene, twelve trees, ~4.7k model-driven leaves. Open directly, no build step. |
 | `test-model.js` | `node test-model.js` — validation harness, 40 checks. |
 | `calibrate-species.js` | Bisects each species' `sCrit` onto a target completion date. |
 | `check-docs.js` | Guards `leaf-phenology-data.md` §11.5 against drifting from `model.js`. |
@@ -137,18 +138,25 @@ Still to do:
 2. Add the solstice-split sensitivity test against §5's −1.9 / +2.6 d/°C anchors. Only the *sign* has been checked so far, not the magnitude.
 3. Confirm the frost regime does not flatten every season into "killed by freeze in September" — partially checked (median first frost Oct 3 vs the Sep 25 normal), not yet asserted.
 
-### Phase 4 — Real visualization
-Once the model's behavior is validated:
-- Recommended: **p5.js**, from CDN, rendering to canvas — suits organic leaf shapes, particle motion, and wind-sway physics, no build step.
-- Use **canvas**, not SVG, past ~50 leaves.
-- Ship as a single self-contained HTML file.
+### Phase 4 — Real visualization — **DONE**
+`scene.html`. A Wasatch meadow at ~2100 m: twelve trees over three depth planes — a clonal aspen grove in the left third, the focal bigtooth maple on the right, Gambel oak thickets between, and hazed miniatures of all three on the far bench. Every leaf is a real `M.makeLeaf` advanced by `M.stepLeaf` against one shared `M.makeEnvironment` day and painted with `M.leafColor`; nothing about colour, senescence or abscission is re-decided in the renderer. ~4.7k simulated leaves at density 1.
+
+- **Plain canvas 2D, not p5.js.** The only things p5 was wanted for were organic shapes and particle motion, and both came to a few dozen lines (three `Path2D` silhouettes, one particle integrator). Dropping the CDN keeps the scene openable straight off the filesystem with no network. `scene.html` + `model.js`, no build step.
+- Canvas as planned. Leaves are filled via `setTransform` with the tree transform folded into each leaf matrix by hand — that, plus three shared `Path2D` objects, is what makes a few thousand independently-simulated leaves affordable per frame.
+- Fallen leaves are stamped once onto an offscreen litter layer and blitted, so a ground carrying thousands of leaves costs one `drawImage` rather than thousands of fills.
+- What the model contributes visibly, beyond leaf colour: `env.sun` drives the seasonal light and the sun's height; `env.gust` drives canopy sway, leaf flutter and how hard leaves are pushed downwind as they fall; accumulated frost cures the meadow from green to straw; a hard freeze tints the scene; `env.rain` puts streaks in the air. Aspen leaves twist harder than the other two in the same breeze, which is the one place the renderer takes a species-specific liberty — and the flattened petiole it is imitating is why the species is called quaking aspen.
+- Query string for reproducible stills and side-by-side comparisons: `?day=66&seed=7&still=1&temp=-2&cloud=80&controls=1`. `day` fast-forwards the model rather than the clock, so every intervening day is really simulated. `still` freezes the clock but keeps repainting, which is what makes a headless screenshot deterministic.
+- Not self-contained in one file, deliberately: it loads `model.js` with a `<script>` tag rather than inlining a copy. A pasted copy of the model would be a second source of truth for the biology, which is the one thing this project is organised to avoid.
+
+**Observed while building it:** the aspens are already fully yellow in the last days of August — the model has aspen chlorophyll at 0.11 and `leafColor` at `rgb(218,175,48)` by Aug 31. That is the ungated pure-thermal accumulator doing exactly what §11 says it should, but real Wasatch aspen turns mid-to-late September, so it reads early on screen. `aspen.sCrit` is a `[GUESS]` with no local record under it, and this is the first look the project has had at that guess as a picture rather than as a column of numbers. A visual calibration pass belongs in Phase 3.
 
 ### Phase 5 — Interactivity polish
 - ~~Real-unit sliders~~ **done in Phase 2** — °C, m/s, % cloud, mm, × normal.
 - ~~"Run a season" auto-play with speed multiplier~~ **done.**
 - ~~Species selector~~ **done.**
 - ~~Expose latitude/photoperiod~~ **done** — the day-length model is ~15 lines and takes only DOY + latitude, so it was nearly free.
-- Remaining: whatever polish the real visualization needs.
+- ~~Whatever polish the real visualization needs~~ — Phase 4 ships with play/pause/step, a speed multiplier, a season progress bar, live per-species canopy state, a leaf-density control with a frame-cost readout, new-woods / replay-season, season looping, and keyboard shortcuts.
+- Remaining: nothing identified. A scrubbable season timeline (jump backwards, not only forwards) is the obvious next thing and would need the model to be snapshot-able, which it currently is not.
 
 ---
 
