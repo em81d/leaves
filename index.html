@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fall Leaf Simulation — Wasatch</title>
+<style>
+  :root {
+    --bg: #16191d;
+    --panel: #1e2228;
+    --panel-2: #262b32;
+    --line: #333941;
+    --text: #dfe3e8;
+    --dim: #8b939d;
+    --accent: #c8874a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap {
+    display: grid; grid-template-columns: 268px 1fr; gap: 18px;
+    max-width: 1220px; margin: 0 auto; padding: 18px;
+  }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .2px; }
+  .sub { color: var(--dim); font-size: 11.5px; margin: 0 0 14px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .panel + .panel { margin-top: 12px; }
+  .panel h2 {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--dim); margin: 0 0 11px; font-weight: 600;
+  }
+
+  .ctl { margin-bottom: 13px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+  .ctl label span:last-child {
+    color: var(--accent); font-variant-numeric: tabular-nums; font-weight: 600;
+  }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+  select {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; font: inherit;
+  }
+
+  .btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    flex: 1 1 auto; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 7px 10px;
+    font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: #2f353d; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #14171a; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  /* --- readouts --- */
+  .env { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 14px; }
+  .env div { display: flex; justify-content: space-between; gap: 6px; }
+  .env b { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .env .k { color: var(--dim); }
+
+  .badge {
+    display: inline-block; padding: 2px 7px; border-radius: 4px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  }
+  .badge.frost { background: #2b4b6b; color: #cfe6ff; }
+  .badge.freeze { background: #6b2b33; color: #ffd9dd; }
+  .badge.none { background: #262b32; color: var(--dim); }
+
+  /* --- grid --- */
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  #grid {
+    display: grid; gap: 3px; justify-content: center;
+    grid-template-columns: repeat(var(--cols), 1fr);
+  }
+  .leaf { aspect-ratio: 1; border-radius: 2px; transition: background-color .12s linear, opacity .25s ease; }
+  .leaf.fallen { opacity: 0; }
+
+  /* --- species table --- */
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid var(--line); }
+  th { color: var(--dim); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
+  th:first-child, td:first-child { text-align: left; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
+
+  .note { color: var(--dim); font-size: 11.5px; margin: 10px 0 0; }
+  code { background: var(--panel-2); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ================= CONTROLS ================= -->
+  <div>
+    <h1>Fall Leaf Simulation</h1>
+    <p class="sub">Wasatch montane, ~2100 m &mdash; model behaviour only, no graphics.</p>
+
+    <div class="panel">
+      <h2>Season environment</h2>
+
+      <div class="ctl">
+        <label for="temp"><span>Temperature</span><span id="tempV">0.0 &deg;C</span></label>
+        <input type="range" id="temp" min="-6" max="6" step="0.5" value="0">
+      </div>
+      <div class="ctl">
+        <label for="cloud"><span>Cloud cover</span><span id="cloudV">25 %</span></label>
+        <input type="range" id="cloud" min="0" max="100" step="1" value="25">
+      </div>
+      <div class="ctl">
+        <label for="wind"><span>Mean wind</span><span id="windV">3.0 m/s</span></label>
+        <input type="range" id="wind" min="0" max="12" step="0.25" value="3">
+      </div>
+      <div class="ctl">
+        <label for="winterPrecip"><span>Winter precip (Jan&ndash;Mar)</span><span id="winterPrecipV">1.00 &times;</span></label>
+        <input type="range" id="winterPrecip" min="0" max="2" step="0.05" value="1">
+      </div>
+      <div class="ctl">
+        <label for="precip"><span>In-season rain</span><span id="precipV">1.00 &times;</span></label>
+        <input type="range" id="precip" min="0" max="3" step="0.05" value="1">
+      </div>
+      <div class="ctl">
+        <label for="lat"><span>Latitude</span><span id="latV">40.5 &deg;N</span></label>
+        <input type="range" id="lat" min="32" max="46" step="0.5" value="40.5">
+      </div>
+      <p class="note"><b>Winter precip</b> is the primary driver here: in the
+        western US, a wet Jan&ndash;Mar means colour and leaf fall come later.
+        <b>In-season rain</b> only knocks down already-weakened leaves.</p>
+      <p class="note">Sliders modulate the whole seasonal baseline, not one
+        instant &mdash; the sign of a temperature effect depends on where in the
+        season it lands.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Playback</h2>
+      <div class="ctl">
+        <label for="speed"><span>Speed</span><span id="speedV">1.0 &times;</span></label>
+        <input type="range" id="speed" min="0.25" max="8" step="0.25" value="1">
+      </div>
+      <div class="btns">
+        <button id="play" class="primary">Play</button>
+        <button id="step">Step</button>
+        <button id="reset">Reset</button>
+      </div>
+      <div class="btns" style="margin-top:6px">
+        <button id="seed">New weather</button>
+        <button id="dump">Log season</button>
+      </div>
+      <p class="note"><code>Space</code> play/pause &middot; <code>&rarr;</code> step one day</p>
+    </div>
+
+    <div class="panel">
+      <h2>View</h2>
+      <div class="ctl">
+        <label for="mix"><span>Species</span></label>
+        <select id="mix">
+          <option value="bigtoothMaple,gambelOak,aspen" selected>Mixed &mdash; maple / oak / aspen</option>
+          <option value="bigtoothMaple">Bigtooth maple only</option>
+          <option value="gambelOak">Gambel oak only</option>
+          <option value="aspen">Quaking aspen only</option>
+        </select>
+      </div>
+      <div class="ctl">
+        <label for="mode"><span>Display</span></label>
+        <select id="mode">
+          <option value="color" selected>Leaf colour</option>
+          <option value="chlorophyll">Chlorophyll</option>
+          <option value="anthocyanin">Anthocyanin (red)</option>
+          <option value="carotenoid">Carotenoid (yellow)</option>
+          <option value="tannin">Tannin (brown)</option>
+          <option value="senescence">Senescence clock</option>
+          <option value="sugar">Sugar</option>
+          <option value="species">Species</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= STAGE ================= -->
+  <div>
+    <div class="stage">
+      <div class="env" style="margin-bottom:14px">
+        <div><span class="k">Date</span><b id="oDate">&mdash;</b></div>
+        <div><span class="k">Day</span><b id="oDay">&mdash;</b></div>
+        <div><span class="k">Daylength</span><b id="oLen">&mdash;</b></div>
+        <div><span class="k">Night low</span><b id="oTmin">&mdash;</b></div>
+        <div><span class="k">Day high</span><b id="oTmax">&mdash;</b></div>
+        <div><span class="k">Sunlight</span><b id="oSun">&mdash;</b></div>
+        <div><span class="k">Wind gust</span><b id="oGust">&mdash;</b></div>
+        <div><span class="k">Rain</span><b id="oRain">&mdash;</b></div>
+        <div><span class="k">Fallen</span><b id="oFallen">&mdash;</b></div>
+        <div><span class="k">Frost</span><b id="oFrost">&mdash;</b></div>
+      </div>
+      <div id="grid"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Per species (attached leaves)</h2>
+      <table>
+        <thead>
+          <tr><th>Species</th><th>Chl</th><th>Caro</th><th>Anth</th><th>Tann</th><th>Senesc</th><th>Fallen</th></tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <p class="note" id="hint"></p>
+    </div>
+  </div>
+</div>
+
+<script src="model.js"></script>
+<script>
+(function () {
+  'use strict';
+  var M = window.LeafModel;
+
+  var COLS = 24, ROWS = 14;
+  var SPECIES_SWATCH = {
+    bigtoothMaple: '#c0563c', gambelOak: '#b0713f', aspen: '#c9b44e'
+  };
+
+  // Ramp endpoints for the scalar debug views.
+  var RAMPS = {
+    chlorophyll: [ 70, 150,  55],
+    anthocyanin: [200,  48,  44],
+    carotenoid:  [235, 195,  60],
+    tannin:      [125,  90,  55],
+    senescence:  [225, 228, 232],
+    sugar:       [120, 190, 210]
+  };
+
+  var sim = null, cells = [], playing = false, seedCounter = 12345;
+  var acc = 0, lastT = 0;
+
+  var el = function (id) { return document.getElementById(id); };
+
+  var controls = {
+    temp: el('temp'), cloud: el('cloud'), wind: el('wind'),
+    precip: el('precip'), winterPrecip: el('winterPrecip'),
+    lat: el('lat'), speed: el('speed')
+  };
+
+  /* ---------------------------------------------------------------- build */
+  function build() {
+    var mix = el('mix').value.split(',');
+    sim = M.createSim({ cols: COLS, rows: ROWS, mix: mix, seed: seedCounter });
+    pushControls();
+    sim.reset();          // rebuild day 0 under the current slider values
+
+    var grid = el('grid');
+    grid.style.setProperty('--cols', COLS);
+    grid.innerHTML = '';
+    cells = [];
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < sim.leaves.length; i++) {
+      var d = document.createElement('div');
+      d.className = 'leaf';
+      d.title = M.SPECIES[sim.leaves[i].species].name;
+      frag.appendChild(d);
+      cells.push(d);
+    }
+    grid.appendChild(frag);
+    render();
+  }
+
+  function pushControls() {
+    sim.controls.tempOffset = parseFloat(controls.temp.value);
+    sim.controls.cloudCover = parseFloat(controls.cloud.value);
+    sim.controls.windMean   = parseFloat(controls.wind.value);
+    sim.controls.precipMult = parseFloat(controls.precip.value);
+    sim.controls.winterPrecip = parseFloat(controls.winterPrecip.value);
+    sim.controls.latitude   = parseFloat(controls.lat.value);
+  }
+
+  /* --------------------------------------------------------------- render */
+  function rampColor(v, rgb) {
+    v = M.clamp(v, 0, 1);
+    var bg = [27, 31, 36];
+    return 'rgb(' +
+      Math.round(bg[0] + (rgb[0] - bg[0]) * v) + ',' +
+      Math.round(bg[1] + (rgb[1] - bg[1]) * v) + ',' +
+      Math.round(bg[2] + (rgb[2] - bg[2]) * v) + ')';
+  }
+
+  function cellColor(leaf, mode) {
+    if (mode === 'color')   return M.leafColor(leaf);
+    if (mode === 'species') return SPECIES_SWATCH[leaf.species];
+    return rampColor(leaf[mode], RAMPS[mode]);
+  }
+
+  function render() {
+    var mode = el('mode').value;
+    for (var i = 0; i < cells.length; i++) {
+      var leaf = sim.leaves[i], c = cells[i];
+      if (leaf.attached) {
+        c.classList.remove('fallen');
+        c.style.backgroundColor = cellColor(leaf, mode);
+      } else {
+        c.classList.add('fallen');
+      }
+    }
+    renderReadouts();
+  }
+
+  function renderReadouts() {
+    var e = sim.env, all = sim.stats();
+    el('oDate').textContent  = M.doyToLabel(sim.doy);
+    el('oDay').textContent   = sim.day + ' / ' + sim.seasonDays;
+    el('oLen').textContent   = e.dayLength.toFixed(2) + ' h';
+    el('oTmin').textContent  = e.tMin.toFixed(1) + ' °C';
+    el('oTmax').textContent  = e.tMax.toFixed(1) + ' °C';
+    el('oSun').textContent   = e.swMeanWm2 + ' W/m²';
+    el('oGust').textContent  = e.gust.toFixed(1) + ' m/s';
+    el('oRain').textContent  = e.rain.toFixed(1) + ' mm';
+    el('oFallen').textContent = (all.fallenFrac * 100).toFixed(1) + ' %';
+
+    var f = el('oFrost');
+    if (e.hardFreeze)      f.innerHTML = '<span class="badge freeze">HARD FREEZE</span>';
+    else if (e.lightFrost) f.innerHTML = '<span class="badge frost">frost</span>';
+    else                   f.innerHTML = '<span class="badge none">none</span>';
+
+    var rows = '';
+    sim.mix.forEach(function (k) {
+      var s = sim.stats(k);
+      rows += '<tr><td><span class="swatch" style="background:' + SPECIES_SWATCH[k] +
+        '"></span>' + M.SPECIES[k].name + '</td>' +
+        '<td>' + s.chlorophyll.toFixed(2) + '</td>' +
+        '<td>' + s.carotenoid.toFixed(2) + '</td>' +
+        '<td>' + s.anthocyanin.toFixed(2) + '</td>' +
+        '<td>' + s.tannin.toFixed(2) + '</td>' +
+        '<td>' + s.senescence.toFixed(2) + '</td>' +
+        '<td>' + (s.fallenFrac * 100).toFixed(0) + ' %</td></tr>';
+    });
+    el('tbody').innerHTML = rows;
+
+    el('hint').textContent = sim.done()
+      ? 'Season complete. Gambel oak holds some dead leaves through winter — marcescence, not a bug.'
+      : '';
+  }
+
+  /* ------------------------------------------------------------- playback */
+  // 1x = a full season in 90 s, per plan.md's 1-2 minute target.
+  var DAYS_PER_SEC_AT_1X = M.SEASON_DAYS / 90;
+
+  function loop(t) {
+    if (!playing) return;
+    if (!lastT) lastT = t;
+    var dt = Math.min((t - lastT) / 1000, 0.25);
+    lastT = t;
+
+    acc += dt * DAYS_PER_SEC_AT_1X * parseFloat(controls.speed.value);
+    var stepped = false;
+    while (acc >= 1) {
+      acc -= 1;
+      if (!sim.step()) { setPlaying(false); break; }
+      stepped = true;
+    }
+    if (stepped) render();
+    if (playing) requestAnimationFrame(loop);
+  }
+
+  function setPlaying(v) {
+    if (v && sim.done()) return;
+    playing = v;
+    el('play').textContent = v ? 'Pause' : 'Play';
+    if (v) { lastT = 0; requestAnimationFrame(loop); }
+  }
+
+  /* --------------------------------------------------------------- events */
+  function label() {
+    el('tempV').textContent   = (parseFloat(controls.temp.value) >= 0 ? '+' : '') +
+                                parseFloat(controls.temp.value).toFixed(1) + ' °C';
+    el('cloudV').textContent  = controls.cloud.value + ' %';
+    el('windV').textContent   = parseFloat(controls.wind.value).toFixed(1) + ' m/s';
+    el('precipV').textContent = parseFloat(controls.precip.value).toFixed(2) + ' ×';
+    el('winterPrecipV').textContent = parseFloat(controls.winterPrecip.value).toFixed(2) + ' ×';
+    el('latV').textContent    = parseFloat(controls.lat.value).toFixed(1) + ' °N';
+    el('speedV').textContent  = parseFloat(controls.speed.value).toFixed(2) + ' ×';
+  }
+
+  Object.keys(controls).forEach(function (k) {
+    controls[k].addEventListener('input', function () {
+      label();
+      if (k === 'speed') return;
+      pushControls();                      // takes effect going forward
+      // Before the season starts, re-seed day 0 so the readouts (daylength in
+      // particular) reflect the new settings immediately.
+      if (sim.day === 0) { sim.reset(); }
+      render();
+    });
+  });
+
+  el('play').addEventListener('click', function () { setPlaying(!playing); });
+  el('step').addEventListener('click', function () {
+    setPlaying(false);
+    if (sim.step()) render();
+  });
+  el('reset').addEventListener('click', function () {
+    setPlaying(false); acc = 0; sim.reset(); render();
+  });
+  el('seed').addEventListener('click', function () {
+    setPlaying(false); acc = 0;
+    seedCounter = (seedCounter * 1664525 + 1013904223) >>> 0;
+    build();
+  });
+  el('mix').addEventListener('change', function () { setPlaying(false); acc = 0; build(); });
+  el('mode').addEventListener('change', render);
+
+  // Headless season -> console. Phase 3 tuning without building any charts.
+  el('dump').addEventListener('click', function () {
+    var s = M.createSim({ cols: COLS, rows: ROWS, mix: el('mix').value.split(','), seed: sim.seed });
+    Object.assign(s.controls, sim.controls);
+    s.reset();
+    var trace = [];
+    while (s.step()) {
+      var row = { date: M.doyToLabel(s.doy), doy: s.doy, tMin: +s.env.tMin.toFixed(1),
+                  dayLen: +s.env.dayLength.toFixed(2), gust: +s.env.gust.toFixed(1) };
+      s.mix.forEach(function (k) {
+        var st = s.stats(k);
+        row[k] = [st.chlorophyll, st.anthocyanin, st.tannin, st.fallenFrac]
+                 .map(function (v) { return +v.toFixed(3); }).join(' | ');
+      });
+      trace.push(row);
+    }
+    console.log('%cSeason trace  (chl | anth | tann | fallen)', 'font-weight:bold');
+    console.log('controls:', JSON.parse(JSON.stringify(sim.controls)), 'seed:', sim.seed);
+    console.table(trace);
+  });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+    if (ev.code === 'Space')      { ev.preventDefault(); setPlaying(!playing); }
+    if (ev.code === 'ArrowRight') { ev.preventDefault(); setPlaying(false); if (sim.step()) render(); }
+  });
+
+  label();
+  build();
+})();
+</script>
+</body>
+</html>
