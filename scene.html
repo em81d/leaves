@@ -119,6 +119,8 @@
       <span>Sunlight</span><span id="oSun">&mdash;</span>
       <span>Gust</span><span id="oGust">&mdash;</span>
       <span>Overnight</span><span id="oFrost">&mdash;</span>
+      <span>Precip</span><span id="oPrecip">&mdash;</span>
+      <span>Snowpack</span><span id="oSnow">&mdash;</span>
       <span>Canopy held</span><span id="oHeld">&mdash;</span>
     </div>
   </div>
@@ -213,8 +215,16 @@
   var litCv = document.createElement('canvas');
   var litCtx = litCv.getContext('2d');
 
+  // Render scale. Index 0 is full resolution; the frame-rate watchdog in
+  // perfTick steps down through these rather than dropping leaves.
+  // Steps down to 16% of the pixel work at the bottom end. Leaf fills are
+  // small and high-frequency, so they lose far less to a reduced backing store
+  // than a page of text or a diagram would.
+  var QUALITY = [1, 0.75, 0.55, 0.40];
+  var qualityStep = 0;
+
   function resize() {
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2) * QUALITY[qualityStep];
     var cw = window.innerWidth, ch = window.innerHeight;
     cv.width = Math.round(cw * dpr);
     cv.height = Math.round(ch * dpr);
@@ -282,8 +292,8 @@
   // Pinnately lobed oblong — Quercus gambelii, deep rounded sinuses.
   // n is kept low on purpose: these are filled a few thousand times a frame, so
   // outline resolution is a frame-budget decision, not a fidelity one.
-  function oakPath() {
-    var right = [], left = [], n = 14;
+  function oakPath(n) {
+    var right = [], left = [];
     for (var i = 0; i <= n; i++) {
       var t = i / n;
       var w = 0.40 * Math.pow(Math.sin(Math.PI * t), 0.45) *
@@ -295,8 +305,8 @@
   }
 
   // Near-circular with a short point — Populus tremuloides.
-  function aspenPath() {
-    var right = [], left = [], n = 11;
+  function aspenPath(n) {
+    var right = [], left = [];
     for (var i = 0; i <= n; i++) {
       var t = i / n;
       var w = 0.46 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.88)), 0.62);
@@ -306,10 +316,25 @@
     return polyPath(right.concat(left));
   }
 
+  // A coarse lozenge, used for leaves too small to resolve a shape.
+  function stubPath(w) {
+    return polyPath([[0, -0.04], [w, -0.34], [w * 0.72, -0.80],
+                     [0, -1], [-w * 0.72, -0.80], [-w, -0.34]]);
+  }
+
   var LEAF_PATH = {
     bigtoothMaple: maplePath(),
-    gambelOak: oakPath(),
-    aspen: aspenPath()
+    gambelOak: oakPath(14),
+    aspen: aspenPath(11)
+  };
+
+  // Reduced-detail variants for distant/small leaves. Same footprint, a third
+  // of the outline segments; at 9 px and under the difference is invisible and
+  // it is what makes a much denser canopy affordable.
+  var LEAF_PATH_LO = {
+    bigtoothMaple: stubPath(0.42),
+    gambelOak: oakPath(6),
+    aspen: aspenPath(6)
   };
 
   /* ==========================================================================
@@ -331,21 +356,21 @@
       trunk: 168, trunkW: 19, forkAt: 0.60, stems: 1, limbs: [3, 4],
       depth: 5, kids: [2, 3], spread: 0.60, lenF: 0.78, widF: 0.63,
       crook: 0.16, up: 0.10, minW: 1.0,
-      leafLen: 21, perTip: 4, cluster: 0.70, along: 0.75,
+      leafLen: 19, perTip: 7, cluster: 0.74, along: 0.90,
       bark: [66, 56, 50], barkLight: [96, 82, 72]
     },
     gambelOak: {
       trunk: 96, trunkW: 15, forkAt: 0.42, stems: 3, limbs: [3, 3],
       depth: 4, kids: [2, 3], spread: 0.80, lenF: 0.78, widF: 0.62,
       crook: 0.40, up: 0.02, minW: 0.9,
-      leafLen: 18, perTip: 3, cluster: 0.70, along: 0.7,
+      leafLen: 17, perTip: 6, cluster: 0.74, along: 0.95,
       bark: [63, 55, 48], barkLight: [92, 82, 71]
     },
     aspen: {
       trunk: 300, trunkW: 13, forkAt: 0.98, stems: 1, limbs: [1, 1],
       depth: 5, kids: [2, 2], spread: 0.46, lenF: 0.66, widF: 0.56,
       crook: 0.10, up: 0.30, minW: 0.6,
-      leafLen: 14, perTip: 4, cluster: 0.82, along: 0.55,
+      leafLen: 13, perTip: 7, cluster: 0.86, along: 0.80,
       bark: [214, 213, 200], barkLight: [238, 237, 226]
     }
   };
@@ -368,7 +393,11 @@
         // Leaves hang and face every which way; bias downward.
         rot: Math.PI + (rng() * 2 - 1) * 1.5,
         ph: rng() * TAU,
-        fr: 1.5 + rng() * 1.7,          // flutter frequency
+        // Flutter frequency, rad/s. Deliberately low: 0.9-2.0 rad/s is 0.14-0.32
+        // Hz, a leaf turning over rather than vibrating. The old range topped out
+        // near 3.2 and then got multiplied again by the wind, which is what made
+        // a gale look like television static.
+        fr: 0.9 + rng() * 1.1,
         tw: rng() * TAU,                // twist phase
         fl: 0.5 + rng() * 0.9           // flutter gain
       });
@@ -530,19 +559,46 @@
     falling: [],
     litter: [],
     frostFlash: 0,     // decays over the day after a freeze night
-    windNow: 3,        // smoothed gust, drives sway
     frostDays: 0,      // how much the meadow has cured
     weatherRng: null,
     leafRng: null,
-    endHold: 0
+    endHold: 0,
+
+    /* ------------------------------------------------------------------------
+     * The SMOOTHED weather the picture is actually painted from.
+     *
+     * The model hands over one discrete day at a time, and its day-to-day
+     * weather noise is real (sd ~1.6 C on the night low, gusts drawn fresh every
+     * day). Painting straight from it makes the scene flicker: at 1x a day is
+     * 0.75 s, so a season of independent daily draws reads as strobing rather
+     * than as weather.
+     *
+     * So `vis` chases `tgt` with a time constant measured in SIMULATED DAYS, not
+     * seconds. Consistency at any playback speed is the point — 1.5 days of lag
+     * looks the same at 1x and at 6x, where a fixed number of seconds would be
+     * a third of the season.
+     * ----------------------------------------------------------------------*/
+    vis: null,         // what is drawn
+    tgt: null,         // what the current model day says
+    dayT: 1,           // 0..1 progress of the current day's colour transition
+    windPhase: 0,      // slow gust envelope, keeps wind from being a flat number
+
+    /* Snow, tracked as a freezing-level problem rather than a decoration.
+     * `line` is the elevation (m) above which precipitation is falling as snow;
+     * `pack` is 0..1 accumulated snowpack; `lineDrawn` is the eased version the
+     * ridges are actually clipped against. */
+    snow: null
   };
+
+  // Smoothing time constants, in simulated days.
+  var TAU_LIGHT = 1.6, TAU_WIND = 2.2, TAU_RAIN = 0.9, TAU_TEMP = 2.0, TAU_SNOW = 3.0;
 
   var SKY = {
     clearTop:  [ 74, 138, 196], clearHz: [204, 226, 234],
     cloudTop:  [116, 126, 136], cloudHz: [182, 184, 186],
     warmHz:    [236, 192, 142]
   };
-  var MAX_FALLING = 1400, MAX_LITTER = 5000;
+  var MAX_FALLING = 1600, MAX_LITTER = 9000;
 
   function buildScene() {
     var rng = M.makeRng(sc.seed ^ 0x5bf03635);
@@ -553,7 +609,7 @@
 
     for (var i = 0; i < LAYOUT.length; i++) {
       var L = LAYOUT[i];
-      var d = sc.dens * (L.k < 0.5 ? 0.26 : L.k < 0.9 ? 0.56 : 1);
+      var d = sc.dens * (L.k < 0.5 ? 0.30 : L.k < 0.9 ? 0.62 : 1);
       // The size boost is for the far bench only. Applied to the mid-ground it
       // flattens the perspective: a tree half the height should not be carrying
       // leaves the same size as the one in front of it.
@@ -583,8 +639,19 @@
         lean: (rng() * 2 - 1) * 0.5, ph: rng() * TAU
       });
     }
-    sc.ridge = ridgeLine(M.makeRng(sc.seed ^ 0x1f83d9ab), 0.6, 585, 105);
-    sc.ridge2 = ridgeLine(M.makeRng(sc.seed ^ 0x2c1b3a77), 1.0, 640, 58);
+    // Three ranges, highest and palest at the back. Each is generated once per
+    // seed, so "New woods" re-cuts the skyline too.
+    sc.ranges = [
+      makeRange(M.makeRng(sc.seed ^ 0x1f83d9ab),
+                { base: 612, amp: 212, rough: 0.215, peaks: 4, tint: 0.66,
+                  envSpan: 0.80, envPhase: 0.34, snowMax: 1.00, rough2: 1.22 }),
+      makeRange(M.makeRng(sc.seed ^ 0x2c1b3a77),
+                { base: 646, amp: 154, rough: 0.255, peaks: 5, tint: 0.40,
+                  envSpan: 1.35, envPhase: 1.90, snowMax: 0.82, rough2: 1.00 }),
+      makeRange(M.makeRng(sc.seed ^ 0x3d5a7f11),
+                { base: 668, amp: 82,  rough: 0.300, peaks: 7, tint: 0.16,
+                  envSpan: 2.10, envPhase: 3.60, snowMax: 0.58, rough2: 1.00 })
+    ];
     sc.conifers = [];
     for (var cf = 0; cf < 110; cf++) {
       var cx = rng() * (W + 60) - 30;
@@ -593,17 +660,165 @@
     resetSeason();
   }
 
-  function ridgeLine(rng, rough, base, amp) {
-    var pts = [], n = 30;
-    for (var i = 0; i <= n; i++) {
-      var t = i / n;
-      var y = base
-        - Math.sin(t * Math.PI * 0.9 + 0.4) * amp
-        - Math.sin(t * 7.1 + rng() * 6) * amp * 0.16 * rough
-        - Math.sin(t * 15.7 + rng() * 6) * amp * 0.07 * rough;
-      pts.push([t * (W + 60) - 30, y]);
+  /* ==========================================================================
+   * 5b. THE RANGE
+   *
+   * Midpoint displacement rather than a sum of sines. A sine skyline has one
+   * characteristic wavelength and reads as a hill; real ridgelines are
+   * self-similar — the same jaggedness at every scale — which is exactly what
+   * halving the displacement with the segment length gives you.
+   * ========================================================================*/
+  // Fractional Brownian motion in one dimension: midpoint displacement where
+  // the amplitude falls off by 2^-H per level. H is the whole point — at H = 1
+  // (amplitude proportional to segment length) the fine detail vanishes and you
+  // get a dome. Around 0.7 you get a ridgeline.
+  var FBM_H = 0.70;
+  var FBM_DECAY = Math.pow(0.5, FBM_H);           // ~0.616
+
+  function makeRange(rng, o) {
+    var pts = [];
+    for (var i = 0; i <= o.peaks; i++) {
+      var t = i / o.peaks;
+      // A broad envelope so the range has a shape, not just noise: highest
+      // around a third of the way across, falling off to both sides.
+      var env = Math.sin(t * Math.PI * o.envSpan + o.envPhase);
+      pts.push([-60 + t * (W + 120), o.base - env * o.amp * (0.55 + 0.70 * rng())]);
     }
-    return pts;
+    var amp = o.amp * o.rough * (o.rough2 || 1);
+    for (var s = 0; s < 6; s++) {                 // 6 subdivisions: 256 segments
+      var out = [pts[0]];
+      for (var j = 1; j < pts.length; j++) {
+        var a = pts[j - 1], b = pts[j];
+        out.push([(a[0] + b[0]) / 2,
+                  (a[1] + b[1]) / 2 - (rng() * 2 - 1) * amp]);
+        out.push(b);
+      }
+      pts = out;
+      amp *= FBM_DECAY;
+    }
+
+    // The high point, which the snow gradient is anchored to.
+    var crest = 1e9, crestX = 0;
+    for (var k = 0; k < pts.length; k++) {
+      if (pts[k][1] < crest) { crest = pts[k][1]; crestX = pts[k][0]; }
+    }
+    return { pts: pts, crest: crest, crestX: crestX,
+             base: o.base, tint: o.tint, snowMax: o.snowMax };
+  }
+
+  /* ==========================================================================
+   * 5c. ELEVATION AND SNOW
+   *
+   * The site is Park City montane, ~2100 m, and the skyline behind it runs to
+   * roughly Timpanogos height. Mapping world y onto real metres is what lets
+   * the snow follow from the weather instead of being painted on: precipitation
+   * falls as snow above the freezing level, the freezing level comes from the
+   * day's mean temperature and the standard lapse rate, and the valley the
+   * trees are standing in is 1300 m below the peaks.
+   *
+   * This is the "rain down here, snow up there" case, and it is the normal
+   * autumn case in the Wasatch — an October storm is rain at the trailhead and
+   * white on the ridge by morning.
+   * ========================================================================*/
+  var SITE_ELEV = 2100;      // m, the meadow. plan.md's site elevation.
+  var PEAK_ELEV = 3450;      // m, the back range's crest
+  var PEAK_Y = 318;          // world y the back range's crest sits at
+  var LAPSE = 6.5;           // [V] C per km, standard environmental lapse rate
+  var SNOW_T = 1.0;          // [P] C, rain/snow changeover, wet-bulb-ish
+  var M_PER_Y = (PEAK_ELEV - SITE_ELEV) / (HORIZON - PEAK_Y);
+
+  function elevOfY(y) { return SITE_ELEV + (HORIZON - y) * M_PER_Y; }
+  function yOfElev(e) { return HORIZON - (e - SITE_ELEV) / M_PER_Y; }
+
+  // The freezing level implied by a valley temperature.
+  function snowLineOf(tMean) {
+    return SITE_ELEV + ((tMean - SNOW_T) / LAPSE) * 1000;
+  }
+
+  function resetSnow() {
+    sc.snow = {
+      line: snowLineOf(20),        // where snow would be falling today
+      elev: PEAK_ELEV + 400,       // bottom of the lying snow; off-screen = none
+      elevDrawn: PEAK_ELEV + 400,  // eased, this is what gets clipped against
+      pack: 0                      // 0..1 depth, drives how opaque it reads
+    };
+  }
+
+  // Once per simulated day.
+  function stepSnow(env) {
+    var s = sc.snow;
+    s.line = snowLineOf(env.tMean);
+
+    // Falling snow: precipitation covers everything above the freezing level.
+    if (env.rain > 0.8 && s.line < PEAK_ELEV) {
+      var reach = clamp(s.line, SITE_ELEV + 130, PEAK_ELEV + 400);
+      if (reach < s.elev) s.elev += (reach - s.elev) * 0.80;   // fresh snow spreads down
+      // How much of the range is above the snow line at all. A storm topping out
+      // 100 m under the summit dusts the tips; one with the line at valley level
+      // whitens everything. Without this a warm rainstorm banked snowpack that
+      // had nowhere to lie.
+      var frac = clamp((PEAK_ELEV - s.line) / 650, 0, 1);
+      s.pack = clamp(s.pack + frac * clamp(env.rain / 12, 0.08, 0.46), 0, 1);
+    }
+
+    // Ablation: warm sunny days eat it from the bottom up and thin what is left.
+    // Snow at 3000 m does not care much about a mild afternoon at 2100 m, which
+    // is why melt is driven by the temperature at the snow's own elevation.
+    var tAtSnow = env.tMean - LAPSE * (s.elev - SITE_ELEV) / 1000;
+    var warm = Math.max(0, tAtSnow - 0.5);
+    s.elev = Math.min(PEAK_ELEV + 400, s.elev + warm * 26 * (0.35 + 0.65 * env.sun));
+    s.pack = clamp(s.pack - 0.030 * warm * (0.4 + 0.6 * env.sun) - 0.004, 0, 1);
+    if (s.pack <= 0) s.elev = PEAK_ELEV + 400;
+  }
+
+  /* ==========================================================================
+   * 5d. SMOOTHED WEATHER
+   *
+   * See the note on sc.vis. Everything the picture is painted from eases toward
+   * the model's day, on time constants measured in simulated days so that the
+   * result looks the same at 1x and at 6x.
+   * ========================================================================*/
+  function resetVis() {
+    var e = sc.env;
+    sc.tgt = { sun: e.sun, gust: e.gust, rain: e.rain, tMean: e.tMean };
+    sc.vis = { sun: e.sun, gust: e.gust, rain: e.rain, tMean: e.tMean };
+    sc.windNow = e.gust;
+    sc.windPhase = 0;
+  }
+
+  function setTargets(e) {
+    sc.tgt.sun = e.sun;
+    sc.tgt.gust = e.gust;
+    sc.tgt.rain = e.rain;
+    sc.tgt.tMean = e.tMean;
+  }
+
+  function ease(cur, tgt, days, tau) {
+    return cur + (tgt - cur) * (1 - Math.exp(-days / tau));
+  }
+
+  function advanceVis(days, dtReal) {
+    // Keep easing while paused or single-stepping, otherwise a stepped day
+    // would freeze half-way through its own transition.
+    var d = Math.max(days, dtReal * 0.7);
+    var v = sc.vis, t = sc.tgt;
+    v.sun = ease(v.sun, t.sun, d, TAU_LIGHT);
+    v.gust = ease(v.gust, t.gust, d, TAU_WIND);
+    v.rain = ease(v.rain, t.rain, d, TAU_RAIN);
+    v.tMean = ease(v.tMean, t.tMean, d, TAU_TEMP);
+    // Colour easing runs on simulated days directly, not on a time constant:
+    // one day of playback should land exactly on that day's colours.
+    sc.dayT = Math.min(1, sc.dayT + days);
+    sc.snow.elevDrawn = ease(sc.snow.elevDrawn, sc.snow.elev, d, TAU_SNOW);
+    sc.frostFlash = Math.max(0, sc.frostFlash - d * 0.42);
+
+    // Wind breathes on top of the smoothed daily mean. A single eased number is
+    // steady to the point of looking dead; a slow envelope on top of it gives
+    // lulls and gusts without touching the frequency the leaves move at.
+    sc.windPhase += dtReal * 0.34;
+    var breathe = 0.74 + 0.26 * Math.sin(sc.windPhase) *
+                                Math.sin(sc.windPhase * 0.41 + 1.1);
+    sc.windNow = v.gust * breathe;
   }
 
   function resetSeason() {
@@ -625,11 +840,16 @@
         var fresh = M.makeLeaf(t.species, lrng);
         fresh.site = site;
         fresh.rgb = rgbOf(M.leafColor(fresh));
+        fresh.rgbPrev = fresh.rgb;
         t.leaves[j] = fresh;
       }
     }
     sc.env = M.makeEnvironment(sc.doy, sc.controls, M.makeRng(sc.seed ^ 0xC2B2AE35));
-    sc.windNow = sc.env.gust;
+    resetSnow();
+    resetVis();
+    sc.dayT = 1;
+    computeLight();
+    maybeRefreshColors(true, -1e9);
     refreshHud();
   }
 
@@ -653,6 +873,7 @@
         var leaf = t.leaves[j];
         if (!leaf.attached) continue;
         M.stepLeaf(leaf, env, sc.leafRng);
+        leaf.rgbPrev = leaf.rgb;
         leaf.rgb = rgbOf(M.leafColor(leaf));
         if (!leaf.attached) {
           // Detached this tick: hand it to the particle system at the exact
@@ -678,8 +899,8 @@
             sc.falling.push({
               x: wx, y: wy,
               vx: 0, vy: 6 + sc.leafRng() * 10,
-              rot: s2.rot, spin: (sc.leafRng() * 2 - 1) * 2.6,
-              ph: sc.leafRng() * TAU, fr: 1.1 + sc.leafRng() * 1.5,
+              rot: s2.rot, spin: (sc.leafRng() * 2 - 1) * 1.7,
+              ph: sc.leafRng() * TAU, fr: 0.8 + sc.leafRng() * 1.0,
               len: s2.len * k, sp: t.species,
               col: css(mix(leaf.rgb, skyHz, t.haze * 0.7)),
               // Once it is lying in the litter a leaf is out of the light and
@@ -701,6 +922,10 @@
 
     if (env.hardFreeze) { sc.frostFlash = 1; sc.frostDays += 1.6; }
     else if (env.lightFrost) { sc.frostFlash = 0.5; sc.frostDays += 0.7; }
+
+    stepSnow(env);
+    setTargets(env);
+    sc.dayT = 0;                 // start easing toward this day's colours
 
     sc.day++;
     refreshHud();
@@ -751,7 +976,7 @@
   var skyTop = SKY.clearTop.slice(), skyHz = SKY.clearHz.slice(), sunF = 1;
 
   function computeLight() {
-    var e = sc.env;
+    var e = sc.vis;                     // smoothed, not the raw model day
     var cloud = clamp(sc.controls.cloudCover / 100, 0, 1);
     sunF = clamp(e.sun, 0, 1);
     // env.sun runs ~0.90 in August down to ~0.35 by late November, and it is
@@ -780,13 +1005,21 @@
     // Sun: sinks toward the ridge as the daylength collapses.
     var cloud = clamp(sc.controls.cloudCover / 100, 0, 1);
     var sy = 150 + (1 - sunF) * 360;
-    var glow = ctx.createRadialGradient(1180, sy, 6, 1180, sy, 260);
+    var glow = ctx.createRadialGradient(1180, sy, 6, 1180, sy, 300);
     var gi = (1 - cloud * 0.82) * (0.30 + 0.34 * sunF);
     glow.addColorStop(0, 'rgba(255,246,222,' + (gi * 1.5).toFixed(3) + ')');
-    glow.addColorStop(0.22, 'rgba(255,232,186,' + (gi * 0.5).toFixed(3) + ')');
+    glow.addColorStop(0.18, 'rgba(255,232,186,' + (gi * 0.55).toFixed(3) + ')');
     glow.addColorStop(1, 'rgba(255,226,180,0)');
     ctx.fillStyle = glow;
-    ctx.fillRect(880, sy - 280, 600, 560);
+    ctx.fillRect(860, sy - 320, 640, 640);
+    // The disc itself, once the overcast is thin enough to show it.
+    if (cloud < 0.72) {
+      var di = (1 - cloud / 0.72) * (0.55 + 0.45 * sunF);
+      ctx.fillStyle = 'rgba(255,251,238,' + (0.90 * di).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(1180, sy, 19, 0, TAU);
+      ctx.fill();
+    }
 
     // Cloud banks: count, opacity and colour all come off the cloud slider, so
     // 0% is an empty desert sky and 100% is a solid overcast.
@@ -830,27 +1063,131 @@
     }
   }
 
-  // tint is aerial perspective: the further ridge is pulled harder toward the
-  // horizon colour, which is what makes it read as further away and not just
-  // as a lighter mountain.
-  function drawRidge(pts, tint, coniferBand) {
-    var col = mix(mix([58, 68, 86], skyHz, tint), skyTop, 0.12);
-    ctx.fillStyle = css(col);
+  // tint is aerial perspective: the further range is pulled harder toward the
+  // horizon colour, which is what makes it read as further away and not just as
+  // a lighter mountain.
+  function drawRange(R, coniferBand) {
+    var pts = R.pts, tint = R.tint;
+    var rock = mix(mix([52, 60, 74], skyHz, tint), skyTop, 0.10);
+    var lit = 0.80 + 0.20 * sunF;
+
+    function silhouette() {
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.lineTo(W + 60, HORIZON + 12);
+      ctx.lineTo(-60, HORIZON + 12);
+      ctx.closePath();
+    }
+
+    // Body: a vertical gradient, bright along the tops and sinking into haze at
+    // the foot. Flat fills are what made these read as cardboard cut-outs.
+    var g = ctx.createLinearGradient(0, R.crest - 20, 0, HORIZON + 12);
+    g.addColorStop(0, css(shade(mix(rock, [255, 246, 232], 0.16), lit)));
+    g.addColorStop(0.45, css(shade(rock, lit)));
+    g.addColorStop(1, css(mix(shade(rock, lit * 0.92), skyHz, 0.18)));
+    ctx.fillStyle = g;
+    silhouette();
+    ctx.fill();
+
+    ctx.save();
+    silhouette();
+    ctx.clip();
+
+    // Across-slope light: lit on the sun side, shaded away from it.
+    var hg = ctx.createLinearGradient(-60, 0, W + 60, 0);
+    var shadeA = (0.16 - tint * 0.07) * (0.55 + 0.45 * sunF);
+    hg.addColorStop(0, 'rgba(18,24,44,' + shadeA.toFixed(3) + ')');
+    hg.addColorStop(0.52, 'rgba(18,24,44,0)');
+    hg.addColorStop(1, 'rgba(255,244,222,' + (shadeA * 1.15).toFixed(3) + ')');
+    ctx.fillStyle = hg;
+    ctx.fillRect(-60, R.crest - 300, W + 120, HORIZON + 320 - R.crest);
+
+    /* Snow, as a dusting anchored to this range's own crest.
+     *
+     * The previous version filled everything above the freezing-level contour
+     * with solid white, using a fractal curve for the lower edge. Two things
+     * were wrong with it. The curve was generated independently of the ridge, so
+     * its shape had no relationship to the mountain underneath and it read as a
+     * white band painted across the backdrop. And because the contour is one
+     * elevation shared by the whole scene, when it dropped past a nearer, lower
+     * range that range went white too — over the top of a different haze tint,
+     * which is what made the foothills discolour.
+     *
+     * Both problems come from the same mistake: drawing a boundary at all. Snow
+     * cover on a hillside is not a line, it is a gradient with elevation — thick
+     * on the summits, thinning downslope, gone below the freezing level. So this
+     * fades from the ridge down instead, and the only edge it has is the
+     * silhouette itself, which is why it now looks like snow on THIS mountain.
+     *
+     * Each range is measured against its own crest, so a range that barely pokes
+     * above the snow line gets a faint veil while the high one behind it goes
+     * white. That is both what the physics says and what keeps the ranges
+     * reading as separate distances.
+     */
+    var s = sc.snow;
+    if (s.pack > 0.01) {
+      var sy = yOfElev(s.elevDrawn);
+      var over = sy - R.crest;              // px of this range above the snow line
+      if (over > 8) {
+        // Snow is the brightest thing in the picture and has to stay brighter
+        // than the rock it lies on even after aerial perspective takes its cut,
+        // so it is hazed at about half the rate the rock is.
+        var snowCol = mix([253, 254, 255], skyHz, tint * 0.34);
+        var amount = clamp(over / 200, 0, 1) *
+                     Math.pow(s.pack, 0.60) * R.snowMax;
+        var bottom = Math.min(sy, HORIZON + 12);
+        var sg = ctx.createLinearGradient(0, R.crest - 4, 0, bottom);
+        sg.addColorStop(0.00, cssA(mix(snowCol, [255, 250, 238], 0.10 * sunF), 0.93 * amount));
+        sg.addColorStop(0.30, cssA(snowCol, 0.74 * amount));
+        sg.addColorStop(0.60, cssA(snowCol, 0.36 * amount));
+        sg.addColorStop(0.85, cssA(snowCol, 0.11 * amount));
+        sg.addColorStop(1.00, cssA(snowCol, 0));
+        ctx.fillStyle = sg;
+        ctx.fillRect(-60, R.crest - 8, W + 120, bottom - R.crest + 12);
+
+        // A thin line of rime along the skyline. Stroking the ridge path itself
+        // is the trick: the outer half falls outside the clip, so the white stops
+        // exactly on the silhouette. Kept narrow on purpose — wide enough to see
+        // and it stops being snow near the ridge and becomes white piping traced
+        // around the mountain. The gradient above is what carries the cover; this
+        // only sharpens the skyline it hangs from.
+        ctx.strokeStyle = cssA(mix(snowCol, [255, 252, 246], 0.5), 0.34 * amount);
+        ctx.lineWidth = 1.2 + 3.5 * amount;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (var x = 1; x < pts.length; x++) ctx.lineTo(pts[x][0], pts[x][1]);
+        ctx.stroke();
+      }
+    }
+
+    // Relief is carried by the two gradients above — down-slope and across-slope
+    // — and nothing else. There were drawn gully and spur strokes here, painted
+    // over the snow so rock ribs showed through it. On a photograph of a real
+    // peak that is what you see; at this scale, on flat-shaded stylised rock,
+    // they read as scratches on the backdrop rather than as terrain.
+    ctx.restore();
+
+    // Lit crest line: one pale stroke along the skyline. Cheap, and it is what
+    // separates one range from the one behind it when both are hazed.
+    ctx.strokeStyle = cssA(mix(mix(rock, [255, 250, 240], 0.55), skyHz, tint * 0.5),
+                           0.5 - tint * 0.22);
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(pts[0][0], pts[0][1]);
-    for (var i = 1; i < pts.length; i++) {
-      var p = pts[i], q = pts[i - 1];
-      ctx.quadraticCurveTo(q[0], q[1], (p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
-    }
-    ctx.lineTo(W + 40, HORIZON + 10);
-    ctx.lineTo(-40, HORIZON + 10);
-    ctx.closePath();
-    ctx.fill();
+    for (var j = 1; j < pts.length; j++) ctx.lineTo(pts[j][0], pts[j][1]);
+    ctx.stroke();
 
     if (coniferBand) {
       // A dark conifer belt along the bench — the evergreen counterpoint that
       // makes the deciduous colour read as colour.
-      ctx.fillStyle = css(mix([32, 50, 43], skyHz, 0.22));
+      var conif = mix([32, 50, 43], skyHz, 0.22);
+      // Snow loads the evergreens once the cover reaches the bench.
+      var cDust = clamp((elevOfY(HORIZON - 40) + 190 - sc.snow.elevDrawn) / 260, 0, 1) *
+                  sc.snow.pack;
+      if (cDust > 0.01) conif = mix(conif, mix([240, 244, 250], skyHz, 0.25), 0.62 * cDust);
+      ctx.fillStyle = css(conif);
       for (var c = 0; c < sc.conifers.length; c++) {
         var t = sc.conifers[c];
         ctx.beginPath();
@@ -871,6 +1208,16 @@
     var lit = 0.62 + 0.38 * sunF;
     near = shade(near, lit); far = shade(far, lit);
 
+    // Valley snow: the same snowpack, when its lower edge reaches the meadow.
+    // A November storm here is snow, not rain, and the model's own freezing
+    // level is what says so.
+    var vSnow = clamp((SITE_ELEV + 250 - sc.snow.elevDrawn) / 250, 0, 1) * sc.snow.pack;
+    if (vSnow > 0.01) {
+      var lay = mix([236, 240, 248], skyHz, 0.18);
+      near = mix(near, lay, 0.72 * vSnow);
+      far = mix(far, mix(lay, skyHz, 0.2), 0.80 * vSnow);
+    }
+
     var g = ctx.createLinearGradient(0, HORIZON - 6, 0, H + 40);
     g.addColorStop(0, css(mix(far, skyHz, 0.26)));
     g.addColorStop(0.10, css(far));
@@ -878,7 +1225,7 @@
     ctx.fillStyle = g;
     ctx.fillRect(-40, HORIZON - 8, W + 80, H - HORIZON + 60);
 
-    var sway = Math.sin(tNow * 1.5) * clamp(sc.windNow / 9, 0, 1);
+    var sway = Math.sin(tNow * 0.9) * clamp(sc.windNow / 9, 0, 1);
     ctx.lineWidth = 1.6;
     ctx.lineCap = 'round';
     for (var i = 0; i < sc.tufts.length; i++) {
@@ -902,6 +1249,63 @@
    * is what makes a few thousand independently-simulated leaves affordable at
    * 60 fps.
    * ========================================================================*/
+  /* --------------------------------------------------------------------------
+   * COLOUR CACHE
+   *
+   * `M.leafColor` returns a string, and the haze mix and the sky tint have to be
+   * folded in on top of it. Doing that per leaf per frame meant building several
+   * thousand short strings sixty times a second, purely to re-derive a value
+   * that only changes when the simulated day does.
+   *
+   * So colours are resolved into `leaf.c` on a schedule instead, and while we
+   * are there the day-to-day change is EASED across the day rather than applied
+   * in one step: a whole canopy shifting colour at once, 1.3 times a second, is
+   * a visible pulse. Eight sub-steps per day, rate-limited so fast playback does
+   * not spend the frame budget rebuilding strings nobody will look at.
+   * ------------------------------------------------------------------------*/
+  var COLOR_STEPS = 8, colorBucket = -1, colorAt = -1e9;
+
+  function refreshLeafColors(mixT) {
+    var lit2 = 0.68 + 0.32 * sunF;
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i], hz = t.haze, lv = t.leaves;
+      var hr = skyHz[0], hg = skyHz[1], hb = skyHz[2];
+      for (var j = 0; j < lv.length; j++) {
+        var lf = lv[j];
+        if (!lf.attached) continue;
+        var a = lf.rgbPrev, b = lf.rgb;
+        var r = a[0] + (b[0] - a[0]) * mixT;
+        var g = a[1] + (b[1] - a[1]) * mixT;
+        var bl = a[2] + (b[2] - a[2]) * mixT;
+        if (hz) { r += (hr - r) * hz; g += (hg - g) * hz; bl += (hb - bl) * hz; }
+        lf.c = 'rgb(' + (r | 0) + ',' + (g | 0) + ',' + (bl | 0) + ')';
+      }
+      // Bark, resolved per depth rather than per branch — same reasoning.
+      var dark = mix(t.spec.bark, skyHz, hz);
+      var light = mix(t.spec.barkLight, skyHz, hz);
+      t.barkCols = [];
+      for (var d = 0; d <= 7; d++) {
+        t.barkCols.push(css(shade(mix(dark, light, clamp(1 - d / 4, 0, 1) * 0.55), lit2)));
+      }
+      t.markCol = cssA(shade(mix([58, 58, 52], skyHz, hz), lit2), 0.55);
+    }
+  }
+
+  function maybeRefreshColors(force, msNow) {
+    if (force) {
+      colorBucket = -1; colorAt = msNow;
+      refreshLeafColors(sc.dayT);
+      return;
+    }
+    var b = Math.min(COLOR_STEPS, Math.round(sc.dayT * COLOR_STEPS));
+    // Refresh on a sub-step boundary, or at least now and then so the slow sky
+    // drift reaches the hazed trees.
+    var due = b !== colorBucket || msNow - colorAt > 700;
+    if (!due || msNow - colorAt < 45) return;
+    colorBucket = b; colorAt = msNow;
+    refreshLeafColors(b / COLOR_STEPS);
+  }
+
   function drawTree(t) {
     var k = t.k, sw = t.sway;
     var ct = Math.cos(sw), st = Math.sin(sw);
@@ -909,13 +1313,10 @@
 
     // --- branches, in tree-local space ------------------------------------
     ctx.setTransform(A * ct, A * st, -A * st, A * ct, OX + S * t.x, OY + S * t.y);
-    var dark = mix(t.spec.bark, skyHz, t.haze);
-    var light = mix(t.spec.barkLight, skyHz, t.haze);
-    var lit2 = 0.68 + 0.32 * sunF;
     ctx.lineCap = 'round';
     for (var i = 0; i < t.branches.length; i++) {
       var b = t.branches[i];
-      ctx.strokeStyle = css(shade(mix(dark, light, clamp(1 - b.d / 4, 0, 1) * 0.55), lit2));
+      ctx.strokeStyle = t.barkCols[b.d];
       ctx.lineWidth = Math.max(0.35, b.w);
       ctx.beginPath();
       ctx.moveTo(b.x1, b.y1);
@@ -923,7 +1324,7 @@
       ctx.stroke();
     }
     // Aspen scars / bark texture.
-    ctx.fillStyle = cssA(shade(mix([58, 58, 52], skyHz, t.haze), lit2), 0.55);
+    ctx.fillStyle = t.markCol;
     for (var m = 0; m < t.marks.length; m++) {
       var mk = t.marks[m];
       ctx.beginPath();
@@ -932,41 +1333,102 @@
     }
 
     // --- leaves ------------------------------------------------------------
-    var path = LEAF_PATH[t.species];
+    // Two silhouettes per species and a per-leaf choice between them. Below
+    // about 9 device pixels the lobes of a maple leaf are not resolvable, so
+    // paying for 19 outline segments to draw them is buying nothing.
+    var path = LEAF_PATH[t.species], pathLo = LEAF_PATH_LO[t.species];
     var windF = clamp(sc.windNow / 10, 0, 1);
     // Quaking aspen earns its name: flattened petiole, so its leaves twist far
     // more than the other two in the same breeze.
-    var twistGain = t.species === 'aspen' ? 0.80 : 0.42;
+    var twistGain = t.species === 'aspen' ? 0.62 : 0.34;
     var leaves = t.leaves;
+
+    /* Wind motion, rewritten to stop the canopy buzzing.
+     *
+     * Three things were making a windy day look like static rather than like
+     * wind, and all three are about frequency, not amplitude:
+     *
+     *  1. Flutter FREQUENCY scaled with wind, so hard wind meant fast wobble.
+     *     Real foliage in a gale swings further, not quicker — the leaf's
+     *     natural period is set by its own size and stiffness. Frequency is now
+     *     nearly wind-independent (a 15% rise, not a doubling) and the base
+     *     rates are lower; wind buys amplitude instead.
+     *  2. Every leaf ran on its own phase, so 4000 leaves each did their own
+     *     thing and the eye read the sum as noise. A gust now travels through
+     *     the canopy as a wave — leaves upwind of a leaf lead it — so the
+     *     motion is CORRELATED and reads as a single moving airmass.
+     *  3. The twist ran at 1.7x the flutter rate, adding a second, faster
+     *     flicker on top. It is now slower than the flutter, not faster.
+     */
+    var gustWave = tNow * (1.05 + 0.45 * windF);      // gust travel, radians
+    var swing = 0.05 + windF * 0.52;                  // amplitude, not rate
     for (var j = 0; j < leaves.length; j++) {
       var leaf = leaves[j];
       if (!leaf.attached) continue;
       var s2 = leaf.site;
-      var flut = (0.06 + windF * 0.55) * s2.fl * Math.sin(tNow * s2.fr * (0.7 + windF) + s2.ph);
-      var phi = s2.rot + flut;
+      // Position along the wind, in world units, so the wave crosses the whole
+      // scene coherently rather than each tree flapping independently.
+      var wpos = (t.x + k * s2.x) * 0.0042 + (t.y + k * s2.y) * 0.0015;
+      var gust = Math.sin(gustWave - wpos);
+      var flut = swing * s2.fl *
+                 Math.sin(tNow * s2.fr * (1 + 0.15 * windF) + s2.ph + gust * 0.9);
+      var phi = s2.rot + flut + gust * windF * 0.16;
       var cp = Math.cos(sw + phi), sp = Math.sin(sw + phi);
-      // Twist about the petiole, seen edge-on as a horizontal squeeze.
-      var tw = 1 - twistGain * windF * (0.5 + 0.5 * Math.sin(tNow * s2.fr * 1.7 + s2.tw));
+      // Twist about the petiole, seen edge-on as a horizontal squeeze. Slower
+      // than the flutter it rides on.
+      var tw = 1 - twistGain * windF *
+               (0.5 + 0.5 * Math.sin(tNow * s2.fr * 0.62 + s2.tw + gust * 0.6));
       var wl = s2.len * tw, hl = s2.len;
-      var c = t.haze ? css(mix(leaf.rgb, skyHz, t.haze)) : css(leaf.rgb);
       ctx.setTransform(A * cp * wl, A * sp * wl, -A * sp * hl, A * cp * hl,
                        OX + S * (t.x + k * (s2.x * ct - s2.y * st)),
                        OY + S * (t.y + k * (s2.x * st + s2.y * ct)));
-      ctx.fillStyle = c;
-      ctx.fill(path);
+      ctx.fillStyle = leaf.c;
+      ctx.fill(s2.len * k * S > 9 ? path : pathLo);
     }
   }
 
   function drawFalling() {
     for (var i = 0; i < sc.falling.length; i++) {
       var p = sc.falling[i];
-      var tw = 0.35 + 0.65 * Math.abs(Math.cos(p.ph * 1.6));
+      var tw = 0.35 + 0.65 * Math.abs(Math.cos(p.ph * 1.1));
       var cp = Math.cos(p.rot), sp = Math.sin(p.rot);
       var wl = p.len * tw, hl = p.len;
       ctx.setTransform(S * cp * wl, S * sp * wl, -S * sp * hl, S * cp * hl,
                        OX + S * p.x, OY + S * p.y);
       ctx.fillStyle = p.col;
       ctx.fill(LEAF_PATH[p.sp]);
+    }
+  }
+
+  /* Tree shadows on the meadow.
+   *
+   * Nothing in the scene said the trees were standing ON the ground rather than
+   * pasted in front of it. One soft ellipse per tree fixes that. It leans away
+   * from the sun and stretches as the sun drops through the season, and it fades
+   * out under overcast, because a shadow is a statement about the light and the
+   * light here is the model's. */
+  function drawShadows() {
+    var cloud = clamp(sc.controls.cloudCover / 100, 0, 1);
+    var strength = (0.30 - 0.24 * cloud) * (0.45 + 0.55 * sunF);
+    if (strength < 0.02) return;
+    // Low sun, long shadow.
+    var stretch = 1.5 + 2.4 * (1 - sunF);
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      var spread = 150 * t.k;
+      var lean = -stretch * 24 * t.k;          // sun is on the right
+      var g = ctx.createRadialGradient(t.x + lean * 0.5, t.y, 0,
+                                       t.x + lean * 0.5, t.y, spread);
+      g.addColorStop(0, 'rgba(28,30,26,' + (strength * (1 - t.haze * 0.7)).toFixed(3) + ')');
+      g.addColorStop(0.55, 'rgba(28,30,26,' + (strength * 0.45 * (1 - t.haze * 0.7)).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(28,30,26,0)');
+      ctx.save();
+      ctx.translate(t.x + lean * 0.5, t.y);
+      ctx.scale(1 + stretch * 0.22, 0.19);     // flattened onto the ground plane
+      ctx.translate(-(t.x + lean * 0.5), -t.y);
+      ctx.fillStyle = g;
+      ctx.fillRect(t.x + lean * 0.5 - spread, t.y - spread, spread * 2, spread * 2);
+      ctx.restore();
     }
   }
 
@@ -987,20 +1449,29 @@
   }
 
   function drawWeather() {
-    var e = sc.env;
+    // Smoothed rain, so a shower arrives and clears over a day instead of
+    // switching on and off between frames.
+    var rain = sc.vis.rain;
     world();
-    if (e.rain > 0.5) {
-      var n = Math.min(300, Math.round(e.rain * 14));
-      ctx.strokeStyle = 'rgba(214,228,240,0.17)';
-      ctx.lineWidth = 0.9;
+    if (rain > 0.4) {
+      var wet = clamp(rain / 16, 0, 1);
+      var n = Math.min(300, Math.round(rain * 14));
+      // Below the freezing level it is rain; at the valley floor on a cold day
+      // it is not, and it should not fall like it.
+      var frozen = sc.snow.line < SITE_ELEV + 60;
+      var fall = frozen ? 260 : 1250;
+      var lean = sc.windNow * (frozen ? 4.2 : 1.6);
+      ctx.strokeStyle = frozen ? 'rgba(240,246,255,' + (0.42 * wet).toFixed(3) + ')'
+                               : 'rgba(214,228,240,' + (0.20 * wet).toFixed(3) + ')';
+      ctx.lineWidth = frozen ? 1.7 : 0.9;
+      ctx.lineCap = 'round';
       ctx.beginPath();
       for (var i = 0; i < n; i++) {
         // Deterministic per-frame streaks: cheap, and no per-drop bookkeeping.
         var sx = ((i * 137.13 + tNow * 90) % (W + 200)) - 100;
-        var sy = ((i * 311.7 + tNow * 1250) % (H + 200)) - 100;
-        var lean = sc.windNow * 1.6;
+        var sy = ((i * 311.7 + tNow * fall) % (H + 200)) - 100;
         ctx.moveTo(sx, sy);
-        ctx.lineTo(sx + lean, sy + 26);
+        ctx.lineTo(sx + lean, sy + (frozen ? 6 : 26));
       }
       ctx.stroke();
     }
@@ -1035,12 +1506,11 @@
     tNow += dt;
     perfTick(real);
 
-    // Wind: chase the day's gust so a windy day visibly moves the canopy.
-    sc.windNow += (sc.env.gust - sc.windNow) * Math.min(1, dt * 0.9);
-    sc.frostFlash = Math.max(0, sc.frostFlash - dt * 0.22);
-
+    var days = 0;
     if (playing) {
-      acc += dt * DAYS_PER_SEC_AT_1X * parseFloat(el('speed').value);
+      var adv = dt * DAYS_PER_SEC_AT_1X * parseFloat(el('speed').value);
+      days = adv;
+      acc += adv;
       var guard = 0;
       while (acc >= 1 && guard++ < 8) {
         acc -= 1;
@@ -1054,25 +1524,32 @@
         }
       }
     }
+    advanceVis(days, dt);
+    maybeRefreshColors(false, ms);
     stepFalling(dt);
 
     // --- paint, back to front ---------------------------------------------
     computeLight();
+    // Whole-tree sway: slower and softer than the leaf flutter it carries, with
+    // a long period underneath so the crowns lean rather than vibrate.
     var swayAmp = clamp(sc.windNow / 11, 0, 1);
     for (var i = 0; i < sc.trees.length; i++) {
       var t = sc.trees[i];
-      t.sway = (0.004 + 0.020 * swayAmp) *
+      t.sway = (0.004 + 0.024 * swayAmp) *
                (Math.sin(tNow * t.swayFr + t.swayPh) +
-                0.35 * Math.sin(tNow * t.swayFr * 2.7 + t.swayPh * 1.7));
+                0.30 * Math.sin(tNow * t.swayFr * 1.9 + t.swayPh * 1.7) +
+                0.45 * Math.sin(tNow * t.swayFr * 0.37 + t.swayPh * 0.6));
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, cv.width, cv.height);
     world();
     drawSky();
-    drawRidge(sc.ridge, 0.66, false);
-    drawRidge(sc.ridge2, 0.34, true);
+    for (var r = 0; r < sc.ranges.length; r++) {
+      drawRange(sc.ranges[r], r === sc.ranges.length - 1);
+    }
     drawMeadow();
+    drawShadows();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(litCv, 0, 0);              // the accumulated leaf carpet
     for (var j = 0; j < sc.trees.length; j++) drawTree(sc.trees[j]);
@@ -1082,15 +1559,46 @@
     requestAnimationFrame(frame);
   }
 
-  // Frame cost, reported in the controls panel: the leaf density slider buys
-  // canopy at a measurable price and it should be visible what that price is.
-  var perfAcc = 0, perfN = 0;
+  /* Frame cost, reported in the controls panel: the leaf density slider buys
+   * canopy at a measurable price and it should be visible what that price is.
+   *
+   * When the frame rate will not hold, RESOLUTION is what gets sacrificed — not
+   * leaves. An earlier version of this thinned the canopy instead, by skipping
+   * every second leaf when the frame rate dropped. That was the wrong trade
+   * twice over: leaves are the thing this whole page exists to show, and the
+   * thinning was invisible in its cause and visible in its effect, so it read
+   * as leaves silently disappearing mid-season rather than as a quality
+   * setting. It was also sticky across seasons, so once it fired the canopy
+   * never came back.
+   *
+   * Render scale is the honest version of the same trade. Halving it quarters
+   * the pixels being shaded — which is where the time actually goes, since
+   * thousands of overlapping leaf fills are bounded by fill area and not by
+   * call count — while every leaf stays exactly where the model put it. The
+   * hysteresis is wide and the windows are long, because a backing store that
+   * resizes whenever the frame rate wobbles is its own kind of ugly.
+   */
+  var perfAcc = 0, perfN = 0, slowRuns = 0, fastRuns = 0;
+
   function perfTick(real) {
     if (!real) return;
     perfAcc += real; perfN++;
     if (perfN < 45) return;
     var fps = perfN / perfAcc;
     perfAcc = 0; perfN = 0;
+
+    // Respond before the stutter is unpleasant rather than after, but keep the
+    // band between the two thresholds wide enough that a machine sitting near
+    // the boundary does not resize its backing store back and forth.
+    if (fps < 40) {
+      fastRuns = 0;
+      if (++slowRuns >= 3 && qualityStep < QUALITY.length - 1) {
+        qualityStep++; slowRuns = 0; resize();
+      }
+    } else if (fps > 56) {
+      slowRuns = 0;
+      if (++fastRuns >= 8 && qualityStep > 0) { qualityStep--; fastRuns = 0; resize(); }
+    } else { slowRuns = 0; fastRuns = 0; }
     var held = 0;
     for (var i = 0; i < sc.trees.length; i++) {
       var lv = sc.trees[i].leaves;
@@ -1098,7 +1606,9 @@
     }
     el('perf').textContent = sc.leaves + ' leaves simulated · ' + held +
       ' on the branch · ' + sc.litter.length + ' in the litter · ' +
-      fps.toFixed(0) + ' fps';
+      fps.toFixed(0) + ' fps' +
+      (qualityStep ? ' · rendering at ' + Math.round(QUALITY[qualityStep] * 100) +
+                     '% scale to hold the frame rate' : '');
   }
 
   /* ==========================================================================
@@ -1136,6 +1646,19 @@
       ? '<span class="badge freeze">HARD FREEZE</span>'
       : e.lightFrost ? '<span class="badge frost">frost</span>'
                      : '<span class="badge none">clear</span>';
+
+    // Precipitation, and what form it is taking at this elevation.
+    var sn = sc.snow;
+    el('oPrecip').textContent = e.rain < 0.05
+      ? 'none'
+      : e.rain.toFixed(1) + ' mm ' + (sn.line < SITE_ELEV + 60 ? 'snow' : 'rain');
+    // Report the cover you can actually see — the bottom edge of the lying
+    // snow — not today's freezing level, which is often above the whole range
+    // on a clear day while the peaks are still white from last week's storm.
+    el('oSnow').textContent = sn.pack < 0.02 || sn.elev > PEAK_ELEV + 150
+      ? 'none'
+      : (Math.round(sn.elev / 10) * 10).toLocaleString('en-US') + ' m up · ' +
+        Math.round(sn.pack * 100) + '%';
 
     var st = speciesStats(), html = '', held = 0, tot = 0;
     var order = ['aspen', 'bigtoothMaple', 'gambelOak'];
@@ -1201,12 +1724,21 @@
   });
   el('speed').addEventListener('input', labels);
 
+  // One day, by hand. Snapping the transition to done is the point: a stepped
+  // day should show its own colours, not sit half-way out of yesterday's.
+  function stepOne() {
+    if (!stepDay()) return;
+    sc.dayT = 1;
+    advanceVis(1, 0);
+    maybeRefreshColors(true, -1e9);
+  }
+
   function setPlaying(v) {
     playing = v;
     el('play').textContent = v ? 'Pause' : 'Play';
   }
   el('play').addEventListener('click', function () { setPlaying(!playing); });
-  el('stepBtn').addEventListener('click', function () { setPlaying(false); stepDay(); });
+  el('stepBtn').addEventListener('click', function () { setPlaying(false); stepOne(); });
   el('replay').addEventListener('click', function () { acc = 0; resetSeason(); setPlaying(true); });
   el('reseed').addEventListener('click', function () {
     acc = 0;
@@ -1219,7 +1751,7 @@
   document.addEventListener('keydown', function (ev) {
     if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
     if (ev.code === 'Space') { ev.preventDefault(); setPlaying(!playing); }
-    else if (ev.code === 'ArrowRight') { ev.preventDefault(); setPlaying(false); stepDay(); }
+    else if (ev.code === 'ArrowRight') { ev.preventDefault(); setPlaying(false); stepOne(); }
     else if (ev.code === 'KeyC') el('panel').classList.toggle('open');
   });
 
@@ -1260,6 +1792,13 @@
       // Drop the leaves that fell on the way — nothing should be mid-air on a
       // still, and the litter belongs on the ground.
       for (var g = 0; g < 400 && sc.falling.length; g++) stepFalling(1 / 30);
+      // The smoothed weather has to catch up too. Easing from day 0 would paint
+      // August light and a bare skyline over an October canopy.
+      resetVis();
+      sc.snow.elevDrawn = sc.snow.elev;
+      sc.dayT = 1;
+      computeLight();
+      maybeRefreshColors(true, -1e9);
     }
     if (p.paused) setPlaying(false);
     if (p.still) { setPlaying(false); still = true; }
