@@ -272,20 +272,41 @@
     return p;
   }
 
-  // Palmate, five lobes with deep sinuses — Acer grandidentatum.
+  /* Palmate, five lobes — Acer grandidentatum, and the species name is the
+   * shape: big-toothed. The lobes are blunt-tipped and carry a few coarse teeth
+   * each, the sinuses between them are deep, and the blade meets the petiole in
+   * a cordate notch. The outline this replaces was nine radial points — five
+   * spikes and four notches — which reads as a generic star rather than a maple.
+   *
+   * Half the margin is tabulated from apex to base and the other half is its
+   * mirror, so the leaf is symmetrical by construction. Angles are measured from
+   * the leaf axis, radii are fractions of leaf length. Held to thirteen control
+   * points on purpose: this path is filled a couple of thousand times a frame and
+   * every entry costs two more line segments.
+   */
   function maplePath() {
-    var lobes = [
-      { a: -1.30, r: 0.62 }, { a: -0.95, r: 0.34 },
-      { a: -0.72, r: 0.92 }, { a: -0.38, r: 0.44 },
-      { a:  0.00, r: 1.00 },
-      { a:  0.38, r: 0.44 }, { a:  0.72, r: 0.92 },
-      { a:  0.95, r: 0.34 }, { a:  1.30, r: 0.62 }
+    var margin = [
+      { a: 0.00, r: 1.00 },   // central lobe — apex
+      { a: 0.12, r: 0.94 },   //   blunt shoulder, not a spike
+      { a: 0.21, r: 0.84 },   //   tooth notch
+      { a: 0.27, r: 0.89 },   //   tooth
+      { a: 0.36, r: 0.50 },   // sinus
+      { a: 0.50, r: 0.78 },   // second lobe — rising margin
+      { a: 0.64, r: 0.92 },   //   apex
+      { a: 0.78, r: 0.84 },   //   blunt shoulder
+      { a: 0.88, r: 0.71 },   //   tooth
+      { a: 1.00, r: 0.43 },   // sinus
+      { a: 1.17, r: 0.61 },   // basal lobe — much the shortest
+      { a: 1.45, r: 0.46 },   //   margin turning under
+      { a: 1.95, r: 0.27 }    // cordate base, dips past the petiole
     ];
-    var pts = [[0, -0.06]];
-    for (var i = 0; i < lobes.length; i++) {
-      var a = lobes[i].a, r = lobes[i].r;
-      pts.push([Math.sin(a) * r * 0.82, -Math.cos(a) * r - 0.06]);
+    var WIDE = 0.92;          // about as wide as it is long, which a maple is
+    function edge(m, side) {
+      return [Math.sin(m.a) * m.r * WIDE * side, -Math.cos(m.a) * m.r - 0.06];
     }
+    var pts = [[0, -0.06]];                                    // petiole
+    for (var i = margin.length - 1; i >= 0; i--) pts.push(edge(margin[i], 1));
+    for (var j = 1; j < margin.length; j++) pts.push(edge(margin[j], -1));
     return polyPath(pts);
   }
 
@@ -322,10 +343,40 @@
                      [0, -1], [-w * 0.72, -0.80], [-w, -0.34]]);
   }
 
+  /* The old maple outline, kept as the middle level of detail. Five radial
+   * spikes and four notches: too coarse to be the centre-stage tree's leaf, and
+   * indistinguishable from the toothed version once a leaf is under about
+   * 26 device pixels — which is every maple in the scene except the foreground
+   * one. Detail costs 16 extra line segments per leaf per frame, so it is spent
+   * where it can actually be seen. */
+  function mapleStarPath() {
+    var lobes = [
+      { a: -1.30, r: 0.62 }, { a: -0.95, r: 0.34 },
+      { a: -0.72, r: 0.92 }, { a: -0.38, r: 0.44 },
+      { a:  0.00, r: 1.00 },
+      { a:  0.38, r: 0.44 }, { a:  0.72, r: 0.92 },
+      { a:  0.95, r: 0.34 }, { a:  1.30, r: 0.62 }
+    ];
+    var pts = [[0, -0.06]];
+    for (var i = 0; i < lobes.length; i++) {
+      var a = lobes[i].a, r = lobes[i].r;
+      pts.push([Math.sin(a) * r * 0.82, -Math.cos(a) * r - 0.06]);
+    }
+    return polyPath(pts);
+  }
+
   var LEAF_PATH = {
     bigtoothMaple: maplePath(),
     gambelOak: oakPath(14),
     aspen: aspenPath(11)
+  };
+
+  // Middle detail. Only the maple has a distinct one; for the other two the
+  // full outline is already cheap enough that a third tier would buy nothing.
+  var LEAF_PATH_MID = {
+    bigtoothMaple: mapleStarPath(),
+    gambelOak: LEAF_PATH.gambelOak,
+    aspen: LEAF_PATH.aspen
   };
 
   // Reduced-detail variants for distant/small leaves. Same footprint, a third
@@ -1399,10 +1450,13 @@
     }
 
     // --- leaves ------------------------------------------------------------
-    // Two silhouettes per species and a per-leaf choice between them. Below
-    // about 9 device pixels the lobes of a maple leaf are not resolvable, so
-    // paying for 19 outline segments to draw them is buying nothing.
-    var path = LEAF_PATH[t.species], pathLo = LEAF_PATH_LO[t.species];
+    // Three silhouettes per species and a per-leaf choice between them, by
+    // on-screen size. Below about 9 device pixels the lobes of a maple leaf are
+    // not resolvable at all, and below 26 the teeth are not, so paying for the
+    // full outline at those sizes is buying nothing.
+    var path = LEAF_PATH[t.species];
+    var pathMid = LEAF_PATH_MID[t.species];
+    var pathLo = LEAF_PATH_LO[t.species];
     var windF = clamp(sc.windNow / 10, 0, 1);
     // Quaking aspen earns its name: flattened petiole, so its leaves twist far
     // more than the other two in the same breeze.
@@ -1451,7 +1505,8 @@
                        OX + S * (t.x + k * (s2.x * ct - s2.y * st)),
                        OY + S * (t.y + k * (s2.x * st + s2.y * ct)));
       ctx.fillStyle = leaf.c;
-      ctx.fill(s2.len * k * S > 9 ? path : pathLo);
+      var px = s2.len * k * S;
+      ctx.fill(px > 26 ? path : px > 9 ? pathMid : pathLo);
     }
   }
 
