@@ -16,6 +16,9 @@ A science-driven, interactive visualization of deciduous leaves changing color a
 | `calibrate-species.js` | Bisects each species' `sCrit` onto a target completion date. |
 | `check-docs.js` | Guards `leaf-phenology-data.md` §11.5 against drifting from `model.js`. |
 | `leaf-phenology-data.md` | All sourced data + the research behind every constant. §11 is the live calibration; §1–10 are the derivation. |
+| `plan-visual.md` | Phase 6. How the scene is *painted* — the style seam, and the candidate looks. Option A is built; B/C1/C2/C3 are open. |
+| `style-watercolor.js` | Phase 6, Option C1. A style in its own file, registered into `scene.html`'s seam. |
+| `scene-grove.html` | Phase 7. A **second take** on the visualization, not a style of the first: deeper grove, curved tapered limbs, reworked ground and skyline, deliberately faint light. Open directly. |
 
 ---
 

@@ -77,6 +77,12 @@
   #prog i { display: block; height: 100%; width: 0; background: var(--accent); }
   .spd { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11px; }
   input[type=range] { accent-color: var(--accent); }
+  select {
+    width: 100%; background: rgba(255,255,255,.07); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px;
+    font: inherit; cursor: pointer;
+  }
+  select:hover { background: rgba(255,255,255,.12); }
   .spd input { width: 84px; }
   .spd b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
 
@@ -152,6 +158,8 @@
     <div class="panel-h">Scene</div>
     <div class="ctl"><label for="dens"><span>Leaf density</span><b id="densV">1.00 &times;</b></label>
       <input type="range" id="dens" min="0.3" max="1.6" step="0.05" value="1"></div>
+    <div class="ctl"><label for="style"><span>Style</span></label>
+      <select id="style"></select></div>
     <div class="row">
       <button id="reseed">New woods</button>
       <button id="replay">Replay season</button>
@@ -174,6 +182,7 @@
 </div>
 
 <script src="model.js"></script>
+<script src="style-watercolor.js"></script>
 <script>
 /* ============================================================================
  * PHASE 4 — the real visualization. Rendering only.
@@ -215,6 +224,13 @@
   var litCv = document.createElement('canvas');
   var litCtx = litCv.getContext('2d');
 
+  // Post-processing scratch, at a quarter of the frame in each axis. Bloom is
+  // a blur of a blur, so it neither needs nor wants full resolution — and at
+  // 1/16 the pixels it costs almost nothing.
+  var fxCv = document.createElement('canvas'), fxCtx = fxCv.getContext('2d');
+  var fx2Cv = document.createElement('canvas'), fx2Ctx = fx2Cv.getContext('2d');
+  var grainCv = null, grainPat = null;
+
   // Render scale. Index 0 is full resolution; the frame-rate watchdog in
   // perfTick steps down through these rather than dropping leaves.
   // Steps down to 16% of the pixel work at the bottom end. Leaf fills are
@@ -233,6 +249,8 @@
     OY = ch * dpr - H * S;    // bottom-anchored: crop sky, never the ground
     litCv.width = cv.width;
     litCv.height = cv.height;
+    fxCv.width  = fx2Cv.width  = Math.max(1, cv.width  >> 2);
+    fxCv.height = fx2Cv.height = Math.max(1, cv.height >> 2);
     restampLitter();          // the layer is resolution-bound; rebuild it
   }
 
@@ -256,6 +274,103 @@
     return 'rgba(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ',' + a + ')';
   }
   function shade(c, f) { return [c[0] * f, c[1] * f, c[2] * f]; }
+
+  /* ==========================================================================
+   * 1.5 STYLE SEAM  (Phase 0 of plan-visual.md)
+   *
+   * Every visual treatment the scene can wear is one object in STYLES. A style
+   * implements only the hooks it cares about and anything it leaves out falls
+   * back to what `current` has always done, so adding a look never means
+   * editing the draw path — which is the whole point, because several looks are
+   * going to be tried and compared and four forked copies of this file would
+   * make that impossible.
+   *
+   *   init()                        once per scene build: atlases, textures
+   *   gradeLeaf(rgb, leaf, tree, o) per attached leaf, INSIDE the colour cache.
+   *                                 Writes the final RGB into `o`. Runs eight
+   *                                 times per simulated day, never per frame.
+   *   gradeFree(rgb, o, exposure)   same, for leaves off the tree — airborne
+   *                                 (exposure 1) and litter (exposure < 1).
+   *   wash(rgb, role)               the PALETTE hook. Called on the scene's base
+   *                                 colours — 'skyTop', 'skyHz', 'rock',
+   *                                 'meadowNear', 'meadowFar', 'barkDark',
+   *                                 'barkLight' — so a style can repaint the
+   *                                 whole picture without reimplementing any of
+   *                                 the geometry that draws it.
+   *   afterSky()                    called once the sky gradient is down and
+   *                                 before the ranges, for wash blooms and the
+   *                                 like
+   *   paintLeaf(leaf, path, px)     replaces the ctx.fill() in drawTree
+   *   leafComposite / leafAlpha     composite mode and alpha for the canopy,
+   *                                 the falling leaves and the litter stamp.
+   *                                 'multiply' is what makes glazing work.
+   *   paintBackground()             replaces sky / ranges / meadow
+   *   canopyLayer                   render each canopy to its own offscreen
+   *                                 layer before compositing (multiply styles)
+   *   taperedBranches               limbs as tapered quads, not fixed strokes
+   *   softenDistance                blur the ranges once the sky is laid down
+   *   post()                        screen-space passes over the finished frame
+   *
+   * ?style=lit selects one, and the Scene panel has a dropdown for the same
+   * thing. `current` deliberately implements nothing: it is the baseline every
+   * other style gets judged against, so it has to stay untouched.
+   *
+   * A style may also live in its OWN FILE. Anything on window.LeafStyles is
+   * merged into STYLES at boot; a function there is called with STYLE_API and
+   * must return the style object. That is the only way an outside file can
+   * reach any of this, because everything in here is closed over by the IIFE.
+   * ========================================================================*/
+  var STYLES = {
+    current: { label: 'Flat (original)' },
+    lit: {
+      label: 'Lit',
+      init: litInit,
+      gradeLeaf: litGradeLeaf,
+      gradeFree: litGradeFree,
+      taperedBranches: true,
+      softenDistance: true,
+      post: litPost
+    }
+  };
+  var ST = STYLES.current;
+  var STYLE_NAME = 'current';
+
+  /* What a style in another file is allowed to see. Deliberately getters and
+   * calls rather than a snapshot: S, OX, OY and the light all change under it,
+   * and a style that captured them once would silently paint last frame's
+   * scene. Nothing here lets a style reach the model — colour, senescence and
+   * abscission stay where they were. */
+  var STYLE_API = {
+    get ctx() { return ctx; },
+    get cv() { return cv; },
+    world: function () { world(); },
+    dims: function () {
+      return { S: S, OX: OX, OY: OY, W: W, H: H, HORIZON: HORIZON };
+    },
+    light: function () {
+      return { sunF: sunF, cloudF: cloudF, sunX: SUN_X, sunY: sunWY,
+               skyTop: skyTop, skyHz: skyHz };
+    },
+    env: function () { return sc.vis; },
+    // How many leaves the density slider is asking for. A glazing style needs
+    // this: its depth comes from how often leaves overlap, so the same alpha
+    // that is right at density 1 is far too heavy at 1.6.
+    density: function () { return sc.dens; },
+    quality: function () { return qualityStep; },
+    paths: function () {
+      return { full: LEAF_PATH, mid: LEAF_PATH_MID, lo: LEAF_PATH_LO };
+    },
+    mix: mix, css: css, cssA: cssA, shade: shade, clamp: clamp, TAU: TAU,
+    makeRng: function (seed) { return M.makeRng(seed); }
+  };
+
+  function setStyle(name) {
+    if (!STYLES[name]) return false;
+    ST = STYLES[name];
+    STYLE_NAME = name;
+    if (ST.init) ST.init();
+    return true;
+  }
 
   /* ==========================================================================
    * 2. LEAF SILHOUETTES
@@ -450,8 +565,29 @@
         // a gale look like television static.
         fr: 0.9 + rng() * 1.1,
         tw: rng() * TAU,                // twist phase
-        fl: 0.5 + rng() * 0.9           // flutter gain
+        fl: 0.5 + rng() * 0.9,          // flutter gain
+        // Surface normal, so a style can light this leaf as a card rather than
+        // as a coloured hole. Mostly toward the viewer — nz is negative, the
+        // camera looks along +z — but splayed enough that a canopy catches the
+        // sun unevenly the way a real one does. Baked once: a leaf's resting
+        // attitude does not change, and the flutter that rides on top of it is
+        // far too fast to light per frame.
+        nx: 0, ny: 0, nz: -1,
+        // Directional occlusion, filled in by computeCanopyOcclusion once the
+        // whole crown exists. Eight rays, plus the sky-weighted average.
+        occ: null, sky: 1
       });
+      // Built from draws already made rather than from two fresh ones. Pulling
+      // new numbers here would shift the rng stream for every branch and leaf
+      // after it, so the same seed would stop building the same woods it built
+      // before — and a ?seed= capture URL is supposed to be reproducible.
+      // `tw` is uniform over TAU and `fl` is uniform over 0.5-1.4, which is all
+      // an azimuth and a tilt need; that a leaf's resting attitude ends up
+      // correlated with how it flutters is if anything the right correlation.
+      var _s = out.sites[out.sites.length - 1];
+      var _na = _s.tw, _nz = -(0.28 + 0.62 * ((_s.fl - 0.5) / 0.9));
+      var _nr = Math.sqrt(Math.max(0, 1 - _nz * _nz));
+      _s.nx = Math.cos(_na) * _nr; _s.ny = Math.sin(_na) * _nr; _s.nz = _nz;
     }
   }
 
@@ -463,7 +599,11 @@
     if (Math.sin(ang) > 0.05 && y > -0.42 * spec.trunk) ang = -ang;
 
     var x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
-    out.branches.push({ x1: x, y1: y, x2: x2, y2: y2, w: wid, d: depth });
+    // w2 is the width where this segment ENDS, which is the width its children
+    // start at. Without it a tapered draw has to guess, and guesses show up as
+    // a step at every joint.
+    out.branches.push({ x1: x, y1: y, x2: x2, y2: y2,
+                        w: wid, w2: wid * spec.widF, d: depth });
 
     var tip = depth >= spec.depth || wid < spec.minW;
     if (tip || depth >= spec.depth - 1) {
@@ -511,7 +651,8 @@
           var sl = len / segs;
           var nx = x + Math.cos(ang) * sl, ny = y + Math.sin(ang) * sl;
           out.branches.push({ x1: x, y1: y, x2: nx, y2: ny,
-                              w: wid * (1 - 0.55 * (i / segs)), d: 0 });
+                              w:  wid * (1 - 0.55 * (i / segs)),
+                              w2: wid * (1 - 0.55 * ((i + 1) / segs)), d: 0 });
           if (i >= 2) {
             var limbs = i >= 4 ? 2 : 1;
             for (var k = 0; k < limbs; k++) {
@@ -533,7 +674,8 @@
           var nx2 = bx + Math.cos(ba) * (boleLen / boleSegs);
           var ny2 = by + Math.sin(ba) * (boleLen / boleSegs);
           out.branches.push({ x1: bx, y1: by, x2: nx2, y2: ny2,
-                              w: wid * (1 - 0.22 * (b / boleSegs)), d: 0 });
+                              w:  wid * (1 - 0.22 * (b / boleSegs)),
+                              w2: wid * (1 - 0.22 * ((b + 1) / boleSegs)), d: 0 });
           ba += (rng() * 2 - 1) * spec.crook * 0.5;
           bx = nx2; by = ny2;
         }
@@ -564,7 +706,108 @@
     var top = 0;
     for (var t2 = 0; t2 < out.sites.length; t2++) top = Math.min(top, out.sites[t2].y);
     out.height = -top || 1;
+    computeCanopyOcclusion(out);
     return out;
+  }
+
+  /* ==========================================================================
+   * 3.5 CANOPY OCCLUSION
+   *
+   * A canopy reads as a volume because its interior is dark, and nothing in the
+   * original scene knew a canopy HAD an interior — every leaf was filled with
+   * the model's raw pigment colour whether it sat on the sunlit crown or three
+   * feet inside the crown. This pass measures how buried each leaf is, once, at
+   * build time.
+   *
+   * Method: bin the crown's leaf area into a coarse grid, then march eight rays
+   * out of every leaf and accumulate what they pass through. That gives both
+   * things the light needs, from one computation:
+   *
+   *   occ[d]  how blocked this leaf is toward compass direction d. The sun
+   *           direction picks between two of these at colour-refresh time, so
+   *           direct light is shadowed by the crown without a shadow map.
+   *   sky     the same eight numbers averaged with an upward bias, because
+   *           daylight arrives from above: a ray blocked overhead costs far
+   *           more than one blocked toward the ground. This is ambient
+   *           occlusion, and it is what actually carves out the interior.
+   *
+   * Cost is ~8 x 7 grid lookups per leaf, once per tree per scene build. At
+   * density 1 that is well under a millisecond for the whole scene, and it buys
+   * a per-frame cost of exactly zero.
+   * ========================================================================*/
+  var OCC_DIRS  = 8;
+  var OCC_STEPS = 7;      // how far out each ray marches, in cells
+  var OCC_GAIN  = 2.35;   // [TUNE] mean crown density along a ray is well below
+                          // 1, so the raw accumulation needs lifting before it
+                          // reads as shade rather than as a faint grey wash.
+
+  // Ray directions and their sky weights, built once. -sin because canvas y
+  // runs downward, so -sin(a) is how much of this ray points at the sky.
+  var OCC_DX = [], OCC_DY = [], OCC_SKYW = [], OCC_SKYSUM = 0;
+  (function () {
+    for (var d = 0; d < OCC_DIRS; d++) {
+      var a = d / OCC_DIRS * TAU;
+      OCC_DX.push(Math.cos(a));
+      OCC_DY.push(Math.sin(a));
+      var w = 0.16 + 0.84 * Math.max(0, -Math.sin(a));
+      OCC_SKYW.push(w);
+      OCC_SKYSUM += w;
+    }
+  })();
+
+  function computeCanopyOcclusion(out) {
+    var sites = out.sites, N = sites.length, i, d;
+    if (!N) return;
+
+    var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+    for (i = 0; i < N; i++) {
+      var s0 = sites[i];
+      if (s0.x < minX) minX = s0.x;
+      if (s0.x > maxX) maxX = s0.x;
+      if (s0.y < minY) minY = s0.y;
+      if (s0.y > maxY) maxY = s0.y;
+    }
+    var G = 22;
+    var cw = Math.max(1e-3, (maxX - minX) / G), chh = Math.max(1e-3, (maxY - minY) / G);
+    var dens = new Float32Array(G * G);
+    for (i = 0; i < N; i++) {
+      var gx = clamp(((sites[i].x - minX) / cw) | 0, 0, G - 1);
+      var gy = clamp(((sites[i].y - minY) / chh) | 0, 0, G - 1);
+      // Weighted by blade area, not leaf count: a big leaf shades more.
+      dens[gy * G + gx] += sites[i].len * sites[i].len;
+    }
+    // Normalise to the busiest cell. Occlusion is about relative crowding, and
+    // absolute leaf count is already a user control — without this the density
+    // slider would double as a brightness slider.
+    var peak = 0;
+    for (i = 0; i < dens.length; i++) if (dens[i] > peak) peak = dens[i];
+    if (peak <= 0) return;
+    for (i = 0; i < dens.length; i++) dens[i] /= peak;
+
+    // Falloff weights: a neighbour one cell away shades far harder than one
+    // seven cells away, and the ray has to be normalised by them or a long ray
+    // through thin canopy would out-vote a short ray through thick canopy.
+    var wsum = 0;
+    for (var st = 1; st <= OCC_STEPS; st++) wsum += 1 / st;
+
+    var step = 1.35;                        // cells per march step
+    for (i = 0; i < N; i++) {
+      var s = sites[i];
+      var occ = new Float32Array(OCC_DIRS), skyBlocked = 0;
+      for (d = 0; d < OCC_DIRS; d++) {
+        var acc = 0;
+        for (var k = 1; k <= OCC_STEPS; k++) {
+          var qx = ((s.x + OCC_DX[d] * k * step * cw  - minX) / cw)  | 0;
+          var qy = ((s.y + OCC_DY[d] * k * step * chh - minY) / chh) | 0;
+          // Off the grid is open sky beyond the crown, and contributes nothing.
+          if (qx >= 0 && qx < G && qy >= 0 && qy < G) acc += dens[qy * G + qx] / k;
+        }
+        occ[d] = clamp(acc / wsum * OCC_GAIN, 0, 1);
+        skyBlocked += occ[d] * OCC_SKYW[d];
+      }
+      s.occ = occ;
+      s.sky = clamp(1 - skyBlocked / OCC_SKYSUM, 0, 1);   // 1 = open to the sky
+    }
   }
 
   /* ==========================================================================
@@ -989,7 +1232,7 @@
         x: wx + (sc.leafRng() * 2 - 1) * 60,
         y: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k,
         rot: s2.rot, len: s2.len * k,
-        col: css(shade(mix(leaf.rgb, skyHz, t.haze * 0.7), 0.76)),
+        rgb: leaf.rgb, hz: t.haze,
         sp: t.species, squash: 0.30 + 0.22 * sc.leafRng()
       };
       if (sc.litter.length >= MAX_LITTER) sc.litter.shift();
@@ -1020,10 +1263,13 @@
       rot: s2.rot, spin: (sc.leafRng() * 2 - 1) * 1.7,
       ph: sc.leafRng() * TAU, fr: 0.8 + sc.leafRng() * 1.0,
       len: s2.len * k * near, sp: t.species,
-      col: css(mix(leaf.rgb, skyHz, hz * 0.7)),
+      // Airborne: nothing over it, so it takes the full sky. Resolved once
+      // here rather than per frame — drawFalling runs every frame.
+      col: freeLeafCol(leaf.rgb, hz, 1, 1),
       // Once it is lying in the litter a leaf is out of the light and damp, so
-      // it reads darker than it did on the branch.
-      litCol: css(shade(mix(leaf.rgb, skyHz, hz * 0.7), 0.76)),
+      // it reads darker than it did on the branch. Kept as pigment + haze and
+      // lit at stamp time, not baked here.
+      rgb: leaf.rgb, hz: hz,
       // Spread the landing depth: a tight band of identical y is what makes a
       // leaf drop look like a stripe painted under the tree.
       land: t.y + (sc.leafRng() * 2 - 1) * 52 + 12 * k + 26 * advance,
@@ -1068,7 +1314,7 @@
 
       if (p.y >= p.land) {
         var lay = {
-          x: p.x, y: p.land, rot: p.rot, len: p.len, col: p.litCol, sp: p.sp,
+          x: p.x, y: p.land, rot: p.rot, len: p.len, rgb: p.rgb, hz: p.hz, sp: p.sp,
           squash: 0.30 + 0.22 * (0.5 + 0.5 * Math.sin(p.ph * 7.7))
         };
         // Past the cap the oldest leaves are forgotten, but they stay on the
@@ -1091,6 +1337,10 @@
    * by the cloud slider, so the scene genuinely dims as the season runs out.
    * ========================================================================*/
   var skyTop = SKY.clearTop.slice(), skyHz = SKY.clearHz.slice(), sunF = 1;
+  // Where the sun actually is, hoisted out of drawSky so the leaf lighting and
+  // the disc that gets painted cannot drift apart.
+  var SUN_X = 1180, SUN_BASE_Y = 150, SUN_TRAVEL = 360;
+  var sunWY = SUN_BASE_Y, cloudF = 0;
 
   function computeLight() {
     var e = sc.vis;                     // smoothed, not the raw model day
@@ -1101,6 +1351,8 @@
     // lower-contrast than an August one, not four times darker. So the light
     // multiplier only spans 0.80-1.0 and the seasonal signal is carried mostly
     // by the warm low-sun horizon and the vignette.
+    cloudF = cloud;
+    sunWY = SUN_BASE_Y + (1 - sunF) * SUN_TRAVEL;
     var bright = 0.80 + 0.20 * sunF;
     var wet = clamp(e.rain / 20, 0, 1);
 
@@ -1109,6 +1361,13 @@
     // Low sun runs warm along the horizon; overcast kills it.
     var warm = (1 - sunF) * 1.05 * (1 - cloud * 0.85);
     skyHz = mix(skyHz, SKY.warmHz, clamp(warm, 0, 0.62));
+
+    // Last, so a style repaints the finished sky rather than an intermediate:
+    // everything downstream (rock, snow, haze, meadow) is mixed toward these.
+    if (ST.wash) {
+      skyTop = ST.wash(skyTop, 'skyTop');
+      skyHz  = ST.wash(skyHz,  'skyHz');
+    }
   }
 
   function drawSky() {
@@ -1121,7 +1380,7 @@
 
     // Sun: sinks toward the ridge as the daylength collapses.
     var cloud = clamp(sc.controls.cloudCover / 100, 0, 1);
-    var sy = 150 + (1 - sunF) * 360;
+    var sy = sunWY;
     var glow = ctx.createRadialGradient(1180, sy, 6, 1180, sy, 300);
     var gi = (1 - cloud * 0.82) * (0.30 + 0.34 * sunF);
     glow.addColorStop(0, 'rgba(255,246,222,' + (gi * 1.5).toFixed(3) + ')');
@@ -1186,6 +1445,7 @@
   function drawRange(R, coniferBand) {
     var pts = R.pts, tint = R.tint;
     var rock = mix(mix([52, 60, 74], skyHz, tint), skyTop, 0.10);
+    if (ST.wash) rock = ST.wash(rock, 'rock');
     var lit = 0.80 + 0.20 * sunF;
 
     function silhouette() {
@@ -1324,6 +1584,10 @@
     var far = mix([100, 120, 72], [164, 144, 95], cure);
     var lit = 0.62 + 0.38 * sunF;
     near = shade(near, lit); far = shade(far, lit);
+    if (ST.wash) {
+      near = ST.wash(near, 'meadowNear');
+      far  = ST.wash(far,  'meadowFar');
+    }
 
     // Valley snow: the same snowpack, when its lower edge reaches the meadow.
     // A November storm here is snow, not rain, and the model's own freezing
@@ -1381,6 +1645,7 @@
    * not spend the frame budget rebuilding strings nobody will look at.
    * ------------------------------------------------------------------------*/
   var COLOR_STEPS = 8, colorBucket = -1, colorAt = -1e9;
+  var GBUF = [0, 0, 0];      // scratch, so grading allocates nothing per leaf
 
   function refreshLeafColors(mixT) {
     var lit2 = 0.68 + 0.32 * sunF;
@@ -1394,15 +1659,31 @@
         var r = a[0] + (b[0] - a[0]) * mixT;
         var g = a[1] + (b[1] - a[1]) * mixT;
         var bl = a[2] + (b[2] - a[2]) * mixT;
+        // Light BEFORE haze: the sun reaches the leaf, and the atmosphere sits
+        // between the leaf and the camera. Doing it the other way round hazes
+        // the highlight instead of the leaf.
+        if (ST.gradeLeaf) {
+          GBUF[0] = r; GBUF[1] = g; GBUF[2] = bl;
+          ST.gradeLeaf(GBUF, lf, t, GBUF);
+          r = GBUF[0]; g = GBUF[1]; bl = GBUF[2];
+        }
         if (hz) { r += (hr - r) * hz; g += (hg - g) * hz; bl += (hb - bl) * hz; }
         lf.c = 'rgb(' + (r | 0) + ',' + (g | 0) + ',' + (bl | 0) + ')';
       }
       // Bark, resolved per depth rather than per branch — same reasoning.
       var dark = mix(t.spec.bark, skyHz, hz);
       var light = mix(t.spec.barkLight, skyHz, hz);
+      if (ST.wash) {
+        dark = ST.wash(dark, 'barkDark');
+        light = ST.wash(light, 'barkLight');
+      }
       t.barkCols = [];
+      t.barkShade = [];
       for (var d = 0; d <= 7; d++) {
-        t.barkCols.push(css(shade(mix(dark, light, clamp(1 - d / 4, 0, 1) * 0.55), lit2)));
+        var bc = shade(mix(dark, light, clamp(1 - d / 4, 0, 1) * 0.55), lit2);
+        t.barkCols.push(css(bc));
+        // The underside of a limb, for styles that draw one.
+        t.barkShade.push(css(shade(bc, 0.68)));
       }
       t.markCol = cssA(shade(mix([58, 58, 52], skyHz, hz), lit2), 0.55);
     }
@@ -1430,15 +1711,55 @@
 
     // --- branches, in tree-local space ------------------------------------
     ctx.setTransform(A * ct, A * st, -A * st, A * ct, OX + S * t.x, OY + S * t.y);
-    ctx.lineCap = 'round';
-    for (var i = 0; i < t.branches.length; i++) {
-      var b = t.branches[i];
-      ctx.strokeStyle = t.barkCols[b.d];
-      ctx.lineWidth = Math.max(0.35, b.w);
-      ctx.beginPath();
-      ctx.moveTo(b.x1, b.y1);
-      ctx.lineTo(b.x2, b.y2);
-      ctx.stroke();
+    if (ST.taperedBranches) {
+      /* A constant-width stroke per segment steps the taper at every joint, and
+       * a limb that changes width in visible stages is a good part of what makes
+       * a drawn tree read as drawn. Each segment now carries the width it ENDS
+       * at as well as the one it starts at, so it fills as a quad that narrows
+       * continuously from crotch to twig. The joint circle does what lineCap
+       * 'round' was doing: stops two segments meeting at an angle from notching. */
+      for (var i = 0; i < t.branches.length; i++) {
+        var b = t.branches[i];
+        var bdx = b.x2 - b.x1, bdy = b.y2 - b.y1;
+        var blen = Math.sqrt(bdx * bdx + bdy * bdy);
+        if (blen < 1e-4) continue;
+        var pxn = -bdy / blen, pyn = bdx / blen;
+        var h1 = Math.max(0.20, b.w * 0.5);
+        var h2 = Math.max(0.16, (b.w2 != null ? b.w2 : b.w * 0.7) * 0.5);
+        ctx.fillStyle = t.barkCols[b.d];
+        ctx.beginPath();
+        ctx.moveTo(b.x1 + pxn * h1, b.y1 + pyn * h1);
+        ctx.lineTo(b.x2 + pxn * h2, b.y2 + pyn * h2);
+        ctx.lineTo(b.x2 - pxn * h2, b.y2 - pyn * h2);
+        ctx.lineTo(b.x1 - pxn * h1, b.y1 - pyn * h1);
+        ctx.closePath();
+        ctx.fill();
+        if (h2 > 0.5) { ctx.beginPath(); ctx.arc(b.x2, b.y2, h2, 0, TAU); ctx.fill(); }
+        // A limb is a cylinder and the light is above it, so the underside
+        // carries a shadow. Only worth paying for where one would be visible.
+        if (h1 > 1.1 && t.barkShade) {
+          var sgn = pyn >= 0 ? 1 : -1;
+          ctx.fillStyle = t.barkShade[b.d];
+          ctx.beginPath();
+          ctx.moveTo(b.x1 + pxn * h1 * sgn, b.y1 + pyn * h1 * sgn);
+          ctx.lineTo(b.x2 + pxn * h2 * sgn, b.y2 + pyn * h2 * sgn);
+          ctx.lineTo(b.x2 + pxn * h2 * sgn * 0.34, b.y2 + pyn * h2 * sgn * 0.34);
+          ctx.lineTo(b.x1 + pxn * h1 * sgn * 0.34, b.y1 + pyn * h1 * sgn * 0.34);
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+    } else {
+      ctx.lineCap = 'round';
+      for (var i2 = 0; i2 < t.branches.length; i2++) {
+        var b2 = t.branches[i2];
+        ctx.strokeStyle = t.barkCols[b2.d];
+        ctx.lineWidth = Math.max(0.35, b2.w);
+        ctx.beginPath();
+        ctx.moveTo(b2.x1, b2.y1);
+        ctx.lineTo(b2.x2, b2.y2);
+        ctx.stroke();
+      }
     }
     // Aspen scars / bark texture.
     ctx.fillStyle = t.markCol;
@@ -1482,6 +1803,15 @@
      */
     var gustWave = tNow * (1.05 + 0.45 * windF);      // gust travel, radians
     var swing = 0.05 + windF * 0.52;                  // amplitude, not rate
+
+    // Set once for the whole canopy, not per leaf. 'multiply' here is what
+    // turns overlapping leaves into glazed washes that darken where they stack,
+    // which is how a watercolour canopy gets an interior without anyone
+    // computing an occlusion term for it.
+    if (ST.leafComposite) {
+      ctx.globalCompositeOperation = ST.leafComposite;
+      if (ST.leafAlpha != null) ctx.globalAlpha = ST.leafAlpha;
+    }
     for (var j = 0; j < leaves.length; j++) {
       var leaf = leaves[j];
       // `pending` leaves have been dropped by the model but have not let go on
@@ -1504,13 +1834,26 @@
       ctx.setTransform(A * cp * wl, A * sp * wl, -A * sp * hl, A * cp * hl,
                        OX + S * (t.x + k * (s2.x * ct - s2.y * st)),
                        OY + S * (t.y + k * (s2.x * st + s2.y * ct)));
-      ctx.fillStyle = leaf.c;
       var px = s2.len * k * S;
-      ctx.fill(px > 26 ? path : px > 9 ? pathMid : pathLo);
+      var lp = px > 26 ? path : px > 9 ? pathMid : pathLo;
+      if (ST.paintLeaf) {
+        ST.paintLeaf(leaf, lp, px);
+      } else {
+        ctx.fillStyle = leaf.c;
+        ctx.fill(lp);
+      }
+    }
+    if (ST.leafComposite) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
     }
   }
 
   function drawFalling(list) {
+    if (ST.leafComposite) {
+      ctx.globalCompositeOperation = ST.leafComposite;
+      if (ST.leafAlpha != null) ctx.globalAlpha = ST.leafAlpha;
+    }
     for (var i = 0; i < list.length; i++) {
       var p = list[i];
       var tw = 0.35 + 0.65 * Math.abs(Math.cos(p.ph * 1.1));
@@ -1520,6 +1863,10 @@
                        OX + S * p.x, OY + S * p.y);
       ctx.fillStyle = p.col;
       ctx.fill(LEAF_PATH[p.sp]);
+    }
+    if (ST.leafComposite) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -1555,13 +1902,33 @@
     }
   }
 
+  /* A leaf that is no longer on a tree — airborne, or lying in the litter.
+   * There is no crown over it any more, so it cannot keep the shading it had on
+   * the branch or it reads as a cut-out the moment it lets go. Litter stores
+   * pigment and haze rather than a finished colour string so that restamping
+   * (on resize, or when the style changes) re-lights the whole carpet. */
+  var FREE_BUF = [0, 0, 0];
+  function freeLeafCol(rgb, hz, exposure, dim) {
+    var c = rgb;
+    if (ST.gradeFree) { ST.gradeFree(rgb, FREE_BUF, exposure); c = FREE_BUF; }
+    return css(shade(mix(c, skyHz, hz * 0.7), dim));
+  }
+
   function stampLitter(p) {
     var cp = Math.cos(p.rot), sp = Math.sin(p.rot);
     var wl = p.len, hl = p.len * p.squash;     // lying flat, seen at a glance
     litCtx.setTransform(S * cp * wl, S * sp * wl, -S * sp * hl, S * cp * hl,
                         OX + S * p.x, OY + S * p.y);
-    litCtx.fillStyle = p.col;
+    litCtx.fillStyle = freeLeafCol(p.rgb, p.hz, 0.42, 0.76);
+    if (ST.leafComposite) {
+      litCtx.globalCompositeOperation = ST.leafComposite;
+      if (ST.leafAlpha != null) litCtx.globalAlpha = ST.leafAlpha;
+    }
     litCtx.fill(LEAF_PATH[p.sp]);
+    if (ST.leafComposite) {
+      litCtx.globalCompositeOperation = 'source-over';
+      litCtx.globalAlpha = 1;
+    }
   }
 
   function restampLitter() {
@@ -1606,12 +1973,247 @@
       ctx.fillStyle = g;
       ctx.fillRect(-40, HORIZON - 130, W + 80, H - HORIZON + 180);
     }
-    // Warm-cool vignette, keyed to the seasonal light.
-    var vg = ctx.createRadialGradient(W * 0.5, H * 0.42, H * 0.30, W * 0.5, H * 0.45, H * 0.95);
+    // Warm-cool vignette, keyed to the seasonal light. A style with a post
+    // stack does this in screen space instead — this one is in WORLD space, so
+    // on a wide window it darkens a band up the middle of the picture rather
+    // than the corners of the frame.
+    if (!ST.post) {
+      var vg = ctx.createRadialGradient(W * 0.5, H * 0.42, H * 0.30, W * 0.5, H * 0.45, H * 0.95);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(12,14,20,' + (0.08 + 0.13 * (1 - sunF)).toFixed(3) + ')');
+      ctx.fillStyle = vg;
+      ctx.fillRect(-40, -OY / S - 10, W + 80, H + 80);
+    }
+  }
+
+  /* ==========================================================================
+   * 9.5 STYLE: LIT   (Option A of plan-visual.md)
+   *
+   * The leaves were the only thing in the frame that did not respond to the
+   * light. The sky did, the ranges did, the shadows leaned with the sun, the
+   * bark took a `lit2` multiplier — and every leaf went to screen as the raw
+   * pigment RGB the model handed over, so a leaf on the sunlit crown and one
+   * buried three feet inside the crown were painted identically. That single
+   * inconsistency is most of why the canopy read as a sheet of stickers.
+   *
+   * Two things fix it, and neither costs anything per frame:
+   *
+   *   1. Occlusion, measured once per tree at build (see computeCanopyOcclusion),
+   *      so the canopy has an interior and the interior is dark.
+   *   2. Transmission. The sun is painted in the sky, which means it is BEHIND
+   *      the trees, which means the canopy is backlit — and a backlit autumn
+   *      leaf glows, because light coming through a blade is filtered by the
+   *      pigment it passes through and arrives warmer and far more saturated
+   *      than light bouncing off one. That is the single most recognisable
+   *      thing about autumn foliage and the scene did not have it at all.
+   *
+   * All of it lands in `leaf.c` inside refreshLeafColors, which already runs
+   * eight times per simulated day rather than per frame. Lighting a leaf is
+   * therefore free at 60 fps; it happens on the same schedule as the pigment
+   * change it is lighting.
+   * ========================================================================*/
+  var SUN_Z     = 620;    // [TUNE] how far beyond the scene the sun sits. Small
+                          // values rake the crowns from the side, large values
+                          // put it straight behind them. 620 is roughly the
+                          // scene's own depth and gives both.
+  /* These are set so that a leaf on the open crown lands near 1.0 and a backlit
+   * one goes ABOVE it. That matters more than it sounds: the model's colours are
+   * already the right colours for a well-lit leaf, so a lighting term whose
+   * ceiling is 1.0 cannot do anything but dim the picture — the first tuning
+   * pass here dropped median canopy luminance 27% and looked like dusk in
+   * September. Shade has to be bought by making somewhere else brighter. */
+  var AMB_BASE  = 0.56;   // [TUNE] floor — nothing outdoors is ever black
+  var AMB_SKY   = 0.55;   // [TUNE] the diffuse half of the light
+  var DIR_GAIN  = 0.34;   // [TUNE] blades turned into the sun
+  var TRN_GAIN  = 0.90;   // [TUNE] light coming THROUGH the blade
+  var GLOW_SAT  = 0.85;   // [TUNE] transmitted light is filtered light
+  var GLOW_WARM = [46, 26, -14];
+  var BLOOM_A   = 0.30;   // [TUNE]
+  var GRAIN_A   = 0.055;  // [TUNE]
+
+  function litInit() { ensureGrain(); }
+
+  // Shared tail: saturate and warm a colour by however much of it arrived
+  // through a leaf rather than off one.
+  function applyGlow(r, g, b, glow, o) {
+    if (glow > 0.004) {
+      var y = r * 0.299 + g * 0.587 + b * 0.114, sat = 1 + GLOW_SAT * glow;
+      r = y + (r - y) * sat + GLOW_WARM[0] * glow;
+      g = y + (g - y) * sat + GLOW_WARM[1] * glow;
+      b = y + (b - y) * sat + GLOW_WARM[2] * glow;
+    }
+    o[0] = r < 0 ? 0 : r > 255 ? 255 : r;
+    o[1] = g < 0 ? 0 : g > 255 ? 255 : g;
+    o[2] = b < 0 ? 0 : b > 255 ? 255 : b;
+  }
+
+  function litGradeLeaf(rgb, leaf, t, o) {
+    var s2 = leaf.site, k = t.k;
+    // Resting position is close enough to light from: the flutter that rides on
+    // top of it is an order of magnitude faster than the colour cache ticks.
+    var lx = t.x + k * s2.x, ly = t.y + k * s2.y;
+    var dx = SUN_X - lx, dy = sunWY - ly, dz = SUN_Z;
+    var inv = 1 / Math.sqrt(dx * dx + dy * dy + dz * dz);
+    dx *= inv; dy *= inv; dz *= inv;
+
+    // How much of the sun reaches this leaf: pick between the two baked rays
+    // that straddle the sun's direction. Barely varies inside one crown — the
+    // sun is far — but varies a lot between the tree on the left of the frame
+    // and the one on the right, which is exactly the point.
+    var open = 1;
+    if (s2.occ) {
+      var f = Math.atan2(dy, dx) / TAU * OCC_DIRS;
+      f -= Math.floor(f / OCC_DIRS) * OCC_DIRS;
+      var i0 = f | 0, i1 = (i0 + 1) % OCC_DIRS, ft = f - i0;
+      open = 1 - (s2.occ[i0] + (s2.occ[i1] - s2.occ[i0]) * ft);
+    }
+
+    var ndl = s2.nx * dx + s2.ny * dy + s2.nz * dz;
+    // Overcast collapses everything toward pure sky light: under a solid deck
+    // there is no sun to face and nothing to backlight. This is what finally
+    // makes the cloud slider change the QUALITY of the light rather than only
+    // its brightness.
+    // Not a bare sunF: even late in the season the sun is still a sun, and
+    // multiplying straight by it made the glow disappear exactly when the
+    // canopy is most worth glowing.
+    var clear = (1 - 0.85 * cloudF) * (0.45 + 0.55 * sunF);
+    var direct = (ndl > 0 ? ndl : 0) * open * clear;
+    // tr^1.5, not tr^2: transmission does fall away as a blade turns edge-on and
+    // the path through it lengthens, but squaring crushed it to nothing —
+    // typical blades sit near ndl = -0.3, and 0.3^2 is not a glow.
+    var tr = ndl < 0 ? -ndl : 0;
+    var trans = tr * Math.sqrt(tr) * open * clear;
+
+    var lum = AMB_BASE + AMB_SKY * s2.sky * (0.62 + 0.38 * sunF)
+            + DIR_GAIN * direct + TRN_GAIN * trans;
+    applyGlow(rgb[0] * lum, rgb[1] * lum, rgb[2] * lum, TRN_GAIN * trans, o);
+  }
+
+  // Off the tree: nothing overhead, so full sky and no crown shadow. Airborne
+  // leaves get a representative half-turned blade for the transmission term
+  // rather than a normal of their own — they are tumbling anyway.
+  function litGradeFree(rgb, o, exposure) {
+    var clear = (1 - 0.85 * cloudF) * (0.45 + 0.55 * sunF);
+    var glow = TRN_GAIN * 0.34 * clear * exposure;
+    var lum = AMB_BASE + AMB_SKY * (0.62 + 0.38 * sunF) * exposure + glow;
+    applyGlow(rgb[0] * lum, rgb[1] * lum, rgb[2] * lum, glow, o);
+  }
+
+  /* One tiling noise tile, built once. Centred on mid-grey because 'overlay'
+   * leaves mid-grey untouched, so the tile perturbs the frame rather than
+   * lifting or crushing it. */
+  function ensureGrain() {
+    if (grainCv) return;
+    grainCv = document.createElement('canvas');
+    grainCv.width = grainCv.height = 512;
+    var g = grainCv.getContext('2d');
+    var img = g.createImageData(512, 512), d = img.data;
+    for (var i = 0; i < d.length; i += 4) {
+      var v = 128 + (Math.random() - 0.5) * 74;
+      d[i] = d[i + 1] = d[i + 2] = v;
+      d[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    grainPat = ctx.createPattern(grainCv, 'repeat');
+  }
+
+  /* Depth of field for the price of one composite. Called after the ranges are
+   * down and before anything in front of them is, so blurring the frame back
+   * over itself softens only the distance. */
+  function softenDistance() {
+    if (qualityStep >= 2 || !cv.width) return;
+    var cut = OY + (HORIZON + 16) * S;
+    if (cut <= 0) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, cv.width, Math.min(cv.height, cut));
+    ctx.clip();
+    ctx.globalAlpha = 0.42;
+    ctx.filter = 'blur(' + Math.max(0.6, cv.width * 0.0016).toFixed(2) + 'px)';
+    ctx.drawImage(cv, 0, 0);
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.restore();
+    world();
+  }
+
+  /* The post stack, in screen space, over the finished frame.
+   *
+   * Every pass here is a composite. Nothing reads pixels back: getImageData on
+   * a whole frame costs more than every leaf in it, so the highlight pass that
+   * bloom needs is done by multiplying the frame into itself twice — an x^3
+   * curve that leaves the bright parts and crushes everything else. */
+  function litPost() {
+    var cw = cv.width, chh = cv.height;
+    if (!cw || !chh) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+
+    // --- bloom ------------------------------------------------------------
+    if (qualityStep < 2 && fxCv.width) {
+      fxCtx.setTransform(1, 0, 0, 1, 0, 0);
+      fxCtx.globalCompositeOperation = 'source-over';
+      fxCtx.globalAlpha = 1;
+      fxCtx.clearRect(0, 0, fxCv.width, fxCv.height);
+      fxCtx.drawImage(cv, 0, 0, fxCv.width, fxCv.height);
+
+      fx2Ctx.setTransform(1, 0, 0, 1, 0, 0);
+      fx2Ctx.globalCompositeOperation = 'source-over';
+      fx2Ctx.globalAlpha = 1;
+      fx2Ctx.clearRect(0, 0, fx2Cv.width, fx2Cv.height);
+      fx2Ctx.drawImage(fxCv, 0, 0);
+      fx2Ctx.globalCompositeOperation = 'multiply';
+      fx2Ctx.drawImage(fxCv, 0, 0);
+      fx2Ctx.drawImage(fxCv, 0, 0);
+      fx2Ctx.globalCompositeOperation = 'source-over';
+
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = BLOOM_A * (0.62 + 0.38 * (1 - sunF));
+      ctx.filter = 'blur(' + Math.max(1, cw * 0.007).toFixed(2) + 'px)';
+      ctx.drawImage(fx2Cv, 0, 0, cw, chh);
+      ctx.filter = 'none';
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // --- grade ------------------------------------------------------------
+    // One cast over everything, so sky, bark and foliage read as lit by a
+    // single sun instead of as three separately plausible palettes.
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.fillStyle = 'rgba(255,186,116,' + (0.05 + 0.10 * (1 - sunF)).toFixed(3) + ')';
+    ctx.fillRect(0, 0, cw, chh);
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = 0.05 + 0.07 * (1 - sunF);
+    ctx.fillStyle = 'rgb(196,212,236)';
+    ctx.fillRect(0, 0, cw, chh);
+    ctx.globalAlpha = 1;
+
+    // --- vignette, in screen space this time ------------------------------
+    ctx.globalCompositeOperation = 'source-over';
+    var vr = Math.max(cw, chh);
+    var vg = ctx.createRadialGradient(cw * 0.5, chh * 0.44, vr * 0.30,
+                                      cw * 0.5, chh * 0.48, vr * 0.80);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
-    vg.addColorStop(1, 'rgba(12,14,20,' + (0.08 + 0.13 * (1 - sunF)).toFixed(3) + ')');
+    vg.addColorStop(1, 'rgba(12,14,20,' + (0.16 + 0.18 * (1 - sunF)).toFixed(3) + ')');
     ctx.fillStyle = vg;
-    ctx.fillRect(-40, -OY / S - 10, W + 80, H + 80);
+    ctx.fillRect(0, 0, cw, chh);
+
+    // --- grain ------------------------------------------------------------
+    // Offset every frame: static grain reads as dirt on the lens, moving grain
+    // reads as film.
+    if (qualityStep < 3 && grainPat) {
+      var ox = (Math.random() * 512) | 0, oy = (Math.random() * 512) | 0;
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.globalAlpha = GRAIN_A;
+      ctx.translate(-ox, -oy);
+      ctx.fillStyle = grainPat;
+      ctx.fillRect(ox, oy, cw, chh);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
   }
 
   /* ==========================================================================
@@ -1668,9 +2270,11 @@
     ctx.clearRect(0, 0, cv.width, cv.height);
     world();
     drawSky();
+    if (ST.afterSky) ST.afterSky();
     for (var r = 0; r < sc.ranges.length; r++) {
       drawRange(sc.ranges[r], r === sc.ranges.length - 1);
     }
+    if (ST.softenDistance) softenDistance();
     drawMeadow();
     drawShadows();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1693,6 +2297,8 @@
     }
     if (zb[zb.length - 1].length) drawFalling(zb[zb.length - 1]);
     drawWeather();
+
+    if (ST.post) ST.post();
 
     requestAnimationFrame(frame);
   }
@@ -1953,7 +2559,44 @@
     return true;
   }
 
+  /* Populate the style dropdown from the registry, honour ?style=, and rebuild
+   * what a style change invalidates: attached leaves are re-graded through the
+   * colour cache, and the litter carpet is restamped because it stores pigment
+   * rather than finished colours precisely so it can be re-lit. */
+  function initStyleUI() {
+    // Styles that live in their own file register on window.LeafStyles before
+    // this script runs. A function is a factory and gets STYLE_API; a plain
+    // object is taken as-is.
+    if (window.LeafStyles) {
+      Object.keys(window.LeafStyles).forEach(function (k) {
+        var def = window.LeafStyles[k];
+        try {
+          STYLES[k] = typeof def === 'function' ? def(STYLE_API) : def;
+        } catch (e) {
+          // A broken external style must not take the whole scene down with it.
+          if (window.console) console.warn('style "' + k + '" failed to load', e);
+        }
+      });
+    }
+    var sel = el('style');
+    var html = '';
+    Object.keys(STYLES).forEach(function (k) {
+      html += '<option value="' + k + '">' + STYLES[k].label + '</option>';
+    });
+    sel.innerHTML = html;
+    var m = /[?&]style=([^&]+)/.exec(window.location.search);
+    setStyle(m ? decodeURIComponent(m[1]) : 'current');
+    sel.value = STYLE_NAME;
+    sel.addEventListener('change', function () {
+      setStyle(sel.value);
+      computeLight();
+      maybeRefreshColors(true, -1e9);
+      restampLitter();
+    });
+  }
+
   /* ------------------------------------------------------------------ start */
+  initStyleUI();
   resize();
   labels();
   pushControls();
