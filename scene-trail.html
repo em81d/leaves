@@ -1,0 +1,1851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wasatch Trail — the leaf model painted as a canyon</title>
+<style>
+  :root {
+    --ink: #f6efe2;
+    --dim: #b8ab96;
+    --glass: rgba(24, 18, 13, 0.60);
+    --line: rgba(246, 239, 226, 0.15);
+    --accent: #eda23f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #0b0e12; color: var(--ink);
+    font: 12.5px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .hud { position: fixed; z-index: 2; }
+  .card {
+    background: var(--glass); border: 1px solid var(--line); border-radius: 11px;
+    padding: 11px 13px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 30px rgba(0,0,0,.38);
+  }
+
+  #title { top: 16px; left: 16px; width: 300px; }
+  #title h1 { margin: 0 0 2px; font-size: 13.5px; font-weight: 650; letter-spacing: .2px; }
+  #title .who { color: var(--dim); font-size: 10.5px; margin: 0 0 10px; }
+  #date { display: flex; align-items: baseline; gap: 9px; margin-bottom: 9px; }
+  #date .d { font-size: 22px; font-weight: 650; letter-spacing: .3px; }
+  #date .n { color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .env { display: grid; grid-template-columns: auto auto; gap: 3px 14px; font-size: 11px; }
+  .env span:nth-child(odd) { color: var(--dim); }
+  .env span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+  }
+  .badge.frost  { background: #2b4b6b; color: #d5e9ff; }
+  .badge.freeze { background: #6b2b33; color: #ffdde1; }
+  .badge.none   { background: rgba(255,255,255,.07); color: var(--dim); }
+
+  #legend { top: 16px; right: 16px; width: 236px; }
+  .panel-h {
+    margin: 0 0 9px; font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--dim); font-weight: 650;
+  }
+  .sp { display: grid; grid-template-columns: 14px 1fr auto; gap: 8px; align-items: center; }
+  .sp + .sp { margin-top: 8px; }
+  .sw { width: 14px; height: 14px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.4); }
+  .sp .nm { font-size: 11px; white-space: nowrap; }
+  .sp .nm i { display: block; font-style: normal; color: var(--dim); font-size: 9.5px; }
+  .sp .st { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); }
+  #bar .card { display: flex; align-items: center; gap: 11px; padding: 9px 12px; }
+  button {
+    background: rgba(255,255,255,.08); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(255,255,255,.15); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 650; }
+  button.primary:hover { filter: brightness(1.08); }
+  #scrub { width: 230px; }
+  .spd { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 10.5px; }
+  .spd input { width: 78px; }
+  .spd b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+  input[type=range] { accent-color: var(--accent); }
+
+  #panel { top: 214px; right: 16px; width: 236px; display: none; max-height: calc(100vh - 300px); overflow-y: auto; }
+  #panel.open { display: block; }
+  .ctl { margin-bottom: 11px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 11px; }
+  .ctl label b { color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { width: 100%; margin: 0; }
+  .hr { height: 1px; background: var(--line); margin: 12px 0; }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; }
+  .chk { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11px; margin-top: 10px; }
+  .chk input { accent-color: var(--accent); }
+  .foot { color: var(--dim); font-size: 10px; margin: 10px 0 0; line-height: 1.5; }
+
+  @media (max-width: 900px) {
+    #legend, #panel { display: none; }
+    #title { width: 218px; }
+    #scrub { width: 110px; }
+    .spd { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="hud" id="title">
+  <div class="card">
+    <h1>Wasatch Trail</h1>
+    <p class="who">Three canyon trees, leaf by leaf, on the model's clock.</p>
+    <div id="date"><span class="d" id="oDate">Aug 1</span><span class="n" id="oDay">day 0 / 120</span></div>
+    <div class="env">
+      <span>Night low</span><span id="oTmin">&mdash;</span>
+      <span>Daylength</span><span id="oLen">&mdash;</span>
+      <span>Sunlight</span><span id="oSun">&mdash;</span>
+      <span>Gust</span><span id="oGust">&mdash;</span>
+      <span>Overnight</span><span id="oFrost">&mdash;</span>
+      <span>Still on the branch</span><span id="oHeld">&mdash;</span>
+    </div>
+  </div>
+</div>
+
+<div class="hud" id="legend">
+  <div class="card">
+    <p class="panel-h">The three foreground trees</p>
+    <div id="spList"></div>
+  </div>
+</div>
+
+<div class="hud" id="panel">
+  <div class="card">
+    <p class="panel-h">Weather</p>
+    <div class="ctl"><label for="temp"><span>Temperature</span><b id="tempV">0.0 &deg;C</b></label>
+      <input type="range" id="temp" min="-6" max="6" step="0.5" value="0"></div>
+    <div class="ctl"><label for="winterPrecip"><span>Winter precip (Jan&ndash;Mar)</span><b id="winterPrecipV">1.00 &times;</b></label>
+      <input type="range" id="winterPrecip" min="0.3" max="1.8" step="0.05" value="1"></div>
+    <div class="ctl"><label for="cloud"><span>Cloud cover</span><b id="cloudV">25 %</b></label>
+      <input type="range" id="cloud" min="0" max="100" step="1" value="25"></div>
+    <div class="ctl"><label for="wind"><span>Mean wind</span><b id="windV">3.0 m/s</b></label>
+      <input type="range" id="wind" min="0" max="12" step="0.25" value="3"></div>
+    <div class="ctl"><label for="precip"><span>In-season rain</span><b id="precipV">1.00 &times;</b></label>
+      <input type="range" id="precip" min="0" max="3" step="0.05" value="1"></div>
+    <div class="ctl"><label for="lat"><span>Latitude</span><b id="latV">40.6 &deg;N</b></label>
+      <input type="range" id="lat" min="30" max="46" step="0.5" value="40.65"></div>
+    <div class="hr"></div>
+    <p class="panel-h">Canopy</p>
+    <div class="ctl"><label for="dens"><span>Leaf density</span><b id="densV">1.00 &times;</b></label>
+      <input type="range" id="dens" min="0.35" max="1.35" step="0.05" value="1"></div>
+    <div class="hr"></div>
+    <div class="row">
+      <button id="reseed">New woods</button>
+      <button id="peakBtn">Jump to peak</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="loopSeason" checked> Loop into a new season</label>
+    <p class="foot" id="perf">&mdash;</p>
+  </div>
+</div>
+
+<div class="hud" id="bar">
+  <div class="card">
+    <button class="primary" id="play">Play</button>
+    <button id="stepBtn">Step</button>
+    <input type="range" id="scrub" min="0" max="120" step="1" value="0">
+    <div class="spd"><span>speed</span><input type="range" id="speed" min="0.25" max="6" step="0.25" value="1"><b id="speedV">1.0&times;</b></div>
+    <button id="cfg">Controls</button>
+  </div>
+</div>
+
+<script src="model.js"></script>
+<script>
+/* ============================================================================
+ * SCENE-TRAIL — a second, unrelated way to look at the same model.
+ *
+ * scene.html is a stylised grove seen head-on. This is a painted canyon: a
+ * trail climbing away from the viewer, a snow-capped range behind it, a valley
+ * full of aspen, and THREE trees in the near foreground whose leaves exist one
+ * at a time. Every one of those leaves is its own M.makeLeaf() instance; it is
+ * stepped once per simulated day, it is drawn in the colour M.leafColor()
+ * returns for it that day, and on the day the model detaches it, it falls out
+ * of the tree and lands on the trail.
+ *
+ * DIVISION OF LABOUR — the same rule scene.html follows:
+ *   model.js owns  chlorophyll, carotenoid, anthocyanin, tannin, abscission.
+ *   this file owns geometry, wind, falling, litter, and paint.
+ *
+ * No colour in any canopy is authored here. The three trees are a maple, an
+ * oak and an aspen because those are the three species the model has, and what
+ * they look like on a given day is whatever the model says. The reference
+ * painting supplied the COMPOSITION — where the trunks stand, where the range
+ * sits, how the trail turns, what a leaf is shaped like. It did not supply a
+ * single leaf colour, and there is no lookup table here that lets it.
+ * ==========================================================================*/
+(function () {
+  'use strict';
+
+  var M = window.LeafModel;
+  if (!M) { document.body.innerHTML = '<p style="padding:20px">model.js failed to load.</p>'; return; }
+
+  /* ==========================================================================
+   * 1. VIRTUAL CANVAS
+   *
+   * Everything below is authored in a fixed 1600x880 space (the reference's
+   * aspect) and COVER-fitted to the window, so the composition never reflows:
+   * the trail always meets the bottom edge in the same place.
+   * ========================================================================*/
+  var VW = 1600, VH = 880;
+  var cv = document.getElementById('c');
+  var ctx = cv.getContext('2d');
+  var view = { s: 1, ox: 0, oy: 0, dpr: 1, w: 0, h: 0 };
+
+  function offscreen(w, h) {
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h));
+    return c;
+  }
+
+  /* Baked layers live at a fixed supersample of the virtual space rather than
+   * at 1:1. At 1:1 a 1600-wide sky bitmap is upscaled by the cover fit AND by
+   * the device pixel ratio, and the mountains go visibly soft. 1.5 is the point
+   * where the range still reads as crisp on a 2x display without spending
+   * four full-frame RGBA buffers at 4K. Layers draw with an explicit
+   * destination size, so the scale is invisible to every caller. */
+  var LS = 1.5;
+  function newLayer() {
+    var c = offscreen(VW * LS, VH * LS);
+    var g = c.getContext('2d');
+    g.scale(LS, LS);
+    return { c: c, g: g };
+  }
+  function clearLayer(lay) {
+    lay.g.save();
+    lay.g.setTransform(1, 0, 0, 1, 0, 0);
+    lay.g.clearRect(0, 0, lay.c.width, lay.c.height);
+    lay.g.restore();
+  }
+  function blit(lay) { ctx.drawImage(lay.c, 0, 0, VW, VH); }
+
+  function resize() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = window.innerWidth, h = window.innerHeight;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    // COVER, never letterbox: the composition is the point, so the window
+    // crops it rather than reflowing it.
+    var s = Math.max(w / VW, h / VH);
+    view.dpr = dpr; view.s = s; view.w = w; view.h = h;
+    view.ox = (w - VW * s) / 2;
+    view.oy = (h - VH * s) / 2;
+    if (!skyLay) bakeSky();
+  }
+
+  function applyView() {
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.translate(view.ox, view.oy);
+    ctx.scale(view.s, view.s);
+  }
+
+  /* ==========================================================================
+   * 2. SMALL UTILITIES
+   * ========================================================================*/
+  var clamp = M.clamp;
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  // 'rgb(r,g,b)' -> [r,g,b]. Hand-parsed rather than regexed: this runs once
+  // per leaf per simulated day, which is ~600 000 calls in a silent jump
+  // across the season, and the regex version alone cost seconds there.
+  function rgbOf(str) {
+    var i = 4, n = str.length, out = [0, 0, 0], k = 0, v = -1, ch;
+    for (; i < n && k < 3; i++) {
+      ch = str.charCodeAt(i);
+      if (ch >= 48 && ch <= 57) { v = (v < 0 ? 0 : v) * 10 + (ch - 48); }
+      else if (v >= 0) { out[k++] = v; v = -1; }
+    }
+    if (k < 3 && v >= 0) out[k] = v;
+    return out;
+  }
+  function mix(a, b, t) {
+    return [Math.round(lerp(a[0], b[0], t)),
+            Math.round(lerp(a[1], b[1], t)),
+            Math.round(lerp(a[2], b[2], t))];
+  }
+  function shade(c, k) {
+    return [clamp(Math.round(c[0] * k), 0, 255),
+            clamp(Math.round(c[1] * k), 0, 255),
+            clamp(Math.round(c[2] * k), 0, 255)];
+  }
+  function css(c, a) {
+    return a === undefined
+      ? 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'
+      : 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')';
+  }
+  function hex(h) {
+    return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)];
+  }
+
+  function polyY(pts, x) {
+    if (x <= pts[0][0]) return pts[0][1];
+    for (var i = 1; i < pts.length; i++) {
+      if (x <= pts[i][0]) {
+        var t = (x - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
+        return lerp(pts[i - 1][1], pts[i][1], t);
+      }
+    }
+    return pts[pts.length - 1][1];
+  }
+
+  // Where a falling leaf comes to rest, and where the near grass meets the
+  // trail. Dips toward the viewer at bottom-centre where the path arrives.
+  var GROUND = [[-200, 736], [0, 744], [170, 762], [330, 784], [470, 810], [600, 840],
+                [720, 868], [830, 878], [930, 826], [1030, 778], [1140, 750],
+                [1270, 738], [1400, 746], [1600, 760], [1800, 768]];
+  function groundY(x) { return polyY(GROUND, x); }
+
+  /* ==========================================================================
+   * 3. LEAF SHAPES
+   *
+   * Three silhouettes traced from the reference painting's own foliage: the
+   * star-lobed maple in the left-hand tree, the round-lobed oak in the crown
+   * over the trail, and the near-circular aspen along the right-hand trunks.
+   *
+   * Each is a HALF outline in a unit box — tip at (0, 1), base at (0, -base) —
+   * mirrored at trace time. Authoring one side guarantees the symmetry that
+   * makes a shape still read as a leaf at fourteen pixels.
+   * ========================================================================*/
+  var SHAPES = {
+    // Acer grandidentatum: five lobes, blunt coarse teeth, heart-shaped base.
+    bigtoothMaple: {
+      half: [[0.00, 1.00], [0.09, 0.80], [0.15, 0.62], [0.25, 0.70], [0.31, 0.57],
+             [0.22, 0.45], [0.35, 0.49], [0.52, 0.55], [0.57, 0.42], [0.43, 0.29],
+             [0.31, 0.19], [0.45, 0.15], [0.53, 0.02], [0.40, -0.07], [0.26, -0.17],
+             [0.13, -0.28], [0.05, -0.36]],
+      base: 0.36, stem: 0.46, veins: [[0.50, 0.52], [0.44, 0.14]], w: 1.00
+    },
+    // Quercus gambelii: deeply pinnately lobed, rounded lobes, widest above
+    // the middle. Narrower and longer than the maple.
+    gambelOak: {
+      half: [[0.00, 1.00], [0.13, 0.90], [0.25, 0.80], [0.15, 0.66], [0.29, 0.58],
+             [0.37, 0.45], [0.21, 0.35], [0.35, 0.25], [0.43, 0.11], [0.24, 0.01],
+             [0.34, -0.11], [0.36, -0.25], [0.22, -0.35], [0.09, -0.44]],
+      base: 0.44, stem: 0.34, veins: [[0.33, 0.55], [0.39, 0.09]], w: 0.82
+    },
+    // Populus tremuloides: almost round, abrupt short tip, fine teeth, and the
+    // long flattened petiole that is the entire reason aspen leaves quake.
+    aspen: {
+      half: [[0.00, 1.00], [0.14, 0.90], [0.30, 0.78], [0.42, 0.60], [0.48, 0.38],
+             [0.49, 0.14], [0.44, -0.08], [0.33, -0.26], [0.18, -0.38], [0.06, -0.44]],
+      base: 0.44, stem: 0.72, veins: [[0.40, 0.46], [0.42, 0.05]], w: 0.96
+    }
+  };
+
+  function traceLeaf(g, shp, s) {
+    var h = shp.half, i;
+    g.beginPath();
+    g.moveTo(0, shp.base * s);
+    for (i = h.length - 1; i >= 0; i--) g.lineTo(h[i][0] * s * shp.w, -h[i][1] * s);
+    for (i = 1; i < h.length; i++) g.lineTo(-h[i][0] * s * shp.w, -h[i][1] * s);
+    g.closePath();
+  }
+
+  /* --------------------------------------------------------------------------
+   * LEAF SPRITE ATLAS.
+   *
+   * Six thousand individual leaves is far too many to re-trace as vector paths
+   * every frame, but their colours only change once per SIMULATED day. So each
+   * distinct (species, size, colour) is rasterised once and per frame becomes
+   * one rotated drawImage.
+   *
+   * They all live in ONE 2048-square canvas, shelf-packed, rather than in a
+   * canvas each. That is not a micro-optimisation: a cache of a few thousand
+   * separate <canvas> elements crashes the renderer outright, because each one
+   * is a live drawing surface the browser has to back. An atlas is a single
+   * surface however many sprites are in it, and it keeps the whole canopy on
+   * one texture, which is faster to draw from as well.
+   *
+   * Colour is bucketed to 32 levels per channel and size to 1.5-unit steps: a
+   * canopy occupies a narrow slice of colour space on any given day, so only a
+   * few hundred sprites are ever live. If a long season does walk the atlas
+   * full, it is simply reset and repacked — a stall of a few milliseconds once.
+   * ------------------------------------------------------------------------*/
+  var ATLAS_SIZE = 2048;
+  var SS = 1.5;                    // sprites are rasterised at 1.5x, as layers are
+  var sprites = new Map();
+  var atlas = null;
+  var atlasResets = 0;             // reset once per frame is fine; twice is not
+
+  /* COLOUR QUANTISATION, and why it is adaptive.
+   *
+   * Every leaf carries its own tint from the model, so a full GREEN canopy in
+   * August occupies far more of colour space than an October one, where the
+   * chlorophyll is gone and every leaf has converged on nearly the same red or
+   * gold. Quantise too finely and August needs more distinct sprites than the
+   * atlas can hold: it fills, resets, refills, and resets again — several
+   * thousand fresh vector bakes EVERY FRAME. That is not slow, it is fatal;
+   * it takes the renderer down.
+   *
+   * So the atlas watches itself. If it has to reset more than once inside a
+   * single frame it is thrashing, and the quantisation coarsens by a bit until
+   * the live set fits. Sixteen levels a channel is 4096 colours and is already
+   * finer than the eye resolves in a canopy; this only ever gives up detail
+   * nobody could see, and only on the frames that would otherwise die.
+   */
+  var COL_SHIFT = 4;
+
+  function atlasReset() {
+    if (!atlas) atlas = { c: offscreen(ATLAS_SIZE, ATLAS_SIZE), g: null };
+    atlas.g = atlas.c.getContext('2d');
+    atlas.g.setTransform(1, 0, 0, 1, 0, 0);
+    atlas.g.clearRect(0, 0, ATLAS_SIZE, ATLAS_SIZE);
+    atlas.x = 1; atlas.y = 1; atlas.rowH = 0;
+    sprites.clear();
+    if (++atlasResets > 1 && COL_SHIFT < 6) { COL_SHIFT++; atlasResets = 0; }
+  }
+  function atlasAlloc(w, h) {
+    if (!atlas) atlasReset();
+    if (atlas.x + w + 1 > ATLAS_SIZE) { atlas.x = 1; atlas.y += atlas.rowH + 1; atlas.rowH = 0; }
+    if (atlas.y + h + 1 > ATLAS_SIZE) atlasReset();
+    var r = { x: atlas.x, y: atlas.y, w: w, h: h };
+    atlas.x += w + 1;
+    if (h > atlas.rowH) atlas.rowH = h;
+    return r;
+  }
+
+  function leafSprite(species, size, col) {
+    // Four-unit size steps, for the same reason the colour is bucketed: size
+    // multiplies the colour count, and nobody can tell a 19-px leaf from a
+    // 20-px one in a canopy of three thousand.
+    var sz = Math.max(8, Math.round(size / 4) * 4);
+    var key = species + '|' + sz + '|' + COL_SHIFT + '|' +
+              (col[0] >> COL_SHIFT) + ',' + (col[1] >> COL_SHIFT) + ',' + (col[2] >> COL_SHIFT);
+    var sp = sprites.get(key);
+    if (sp) return sp;
+
+    var shp = SHAPES[species];
+    var pad = 3;
+    var px = sz * SS;                                    // raster size
+    var w = Math.ceil(px * shp.w * 1.15 + pad * 2);
+    var h = Math.ceil((1 + shp.base + shp.stem) * px + pad * 2);
+    var r = atlasAlloc(w, h);
+    var g = atlas.g;
+
+    // Pivot sits on the BLADE, not on the bitmap centre: the petiole hangs
+    // below, and a leaf spinning about its stalk looks wrong.
+    var cx = w / 2, cy = pad + px;
+    g.save();
+    g.translate(r.x + cx, r.y + cy);
+
+    var base = col;
+    var dark = shade(base, 0.60);
+    var rim = shade(base, 1.18);
+
+    g.strokeStyle = css(shade(base, 0.70));
+    g.lineWidth = Math.max(0.8, px * 0.045);
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(0, shp.base * px * 0.7);
+    g.lineTo(0, (shp.base + shp.stem) * px);
+    g.stroke();
+
+    traceLeaf(g, shp, px);
+    g.fillStyle = css(base);
+    g.fill();
+    // The reference is a flat-colour illustration with a drawn line around
+    // every shape. That outline is what makes a mass of leaves read as leaves
+    // instead of as texture, so it is not decoration — it is the style.
+    g.strokeStyle = css(dark, 0.78);
+    g.lineWidth = Math.max(0.8, px * 0.042);
+    g.lineJoin = 'round';
+    g.stroke();
+
+    g.strokeStyle = css(dark, 0.45);
+    g.lineWidth = Math.max(0.5, px * 0.03);
+    g.beginPath();
+    g.moveTo(0, shp.base * px * 0.7); g.lineTo(0, -px * 0.80);
+    for (var v = 0; v < shp.veins.length; v++) {
+      var vv = shp.veins[v];
+      g.moveTo(0, -vv[1] * px * 0.30);
+      g.lineTo(vv[0] * px * shp.w * 0.86, -vv[1] * px * 0.94);
+      g.moveTo(0, -vv[1] * px * 0.30);
+      g.lineTo(-vv[0] * px * shp.w * 0.86, -vv[1] * px * 0.94);
+    }
+    g.stroke();
+
+    // One lit facet along the upper-left edge. The reference lights the whole
+    // canyon from the upper left; this carries that through to every leaf for
+    // the price of a clipped triangle at bake time.
+    g.save();
+    traceLeaf(g, shp, px);
+    g.clip();
+    g.fillStyle = css(rim, 0.32);
+    g.beginPath();
+    g.moveTo(-px, -px); g.lineTo(px * 0.18, -px); g.lineTo(-px, px * 0.4);
+    g.closePath(); g.fill();
+    g.restore();
+    g.restore();
+
+    // Destination geometry is stored in VIRTUAL units, so every caller draws
+    // in scene coordinates and never has to know the atlas is supersampled.
+    sp = { r: r, ox: cx / SS, oy: cy / SS, dw: w / SS, dh: h / SS };
+    sprites.set(key, sp);
+    return sp;
+  }
+
+  // The one place the atlas is unpacked. Every leaf on screen goes through it.
+  function drawSprite(g, sp) {
+    g.drawImage(atlas.c, sp.r.x, sp.r.y, sp.r.w, sp.r.h,
+                -sp.ox, -sp.oy, sp.dw, sp.dh);
+  }
+
+  /* ==========================================================================
+   * 4. THE COMPOSITION
+   *
+   * Hand-authored geometry, measured off the reference. Fractions of the
+   * reference image were multiplied out to the 1600x880 space; the numbers are
+   * literal positions, not a procedural landscape, because the brief was to
+   * reproduce THIS canyon and not a canyon.
+   * ========================================================================*/
+
+  /* The snow range. Summits sit at y ~215 and the visible base of the range at
+   * y ~400, which is where the reference puts them: peaks a quarter of the way
+   * down the frame, the valley floor a little under halfway. The right-hand
+   * tail is deliberately dropped below the far wall behind it so that wall
+   * still shows through the gap between the aspen trunks. */
+  var RIDGE = [[540, 404], [612, 372], [656, 348], [700, 318], [736, 292], [764, 308],
+               [800, 268], [838, 238], [872, 216], [900, 230], [928, 208], [958, 224],
+               [992, 206], [1022, 234], [1056, 252], [1088, 234], [1120, 260],
+               [1158, 290], [1206, 320], [1262, 348], [1320, 372], [1386, 396],
+               [1452, 446], [1520, 466], [1600, 478], [1750, 486]];
+  // a nearer, darker spur that overlaps the range's lower slopes
+  var SPUR  = [[500, 428], [580, 400], [630, 384], [676, 370], [720, 358], [768, 352],
+               [812, 344], [858, 340], [910, 346], [960, 342], [1010, 352], [1070, 362],
+               [1140, 376], [1220, 392], [1310, 404], [1420, 414], [1540, 422], [1750, 428]];
+  // the far blue wall on the right, behind the aspens
+  var FARWALL = [[1150, 452], [1240, 430], [1330, 412], [1420, 424], [1500, 406],
+                 [1580, 420], [1660, 434], [1750, 444]];
+  // where the treed slope begins — the top edge of the valley's forest
+  var SLOPE = [[-100, 428], [120, 420], [340, 412], [520, 418], [700, 410], [860, 400],
+               [1010, 396], [1180, 406], [1360, 418], [1520, 428], [1750, 438]];
+
+  // --- the trail: centre-line with a half-width at each station ------------
+  var TRAIL = [[742, 916, 168], [762, 862, 140], [800, 816, 112], [852, 780, 86],
+               [900, 748, 66], [936, 716, 50], [958, 688, 36], [972, 662, 25],
+               [986, 640, 16], [998, 622, 9], [1006, 608, 4]];
+
+  var SKY_TOP = hex('#4f9ccd'), SKY_MID = hex('#8ec6e2'), SKY_LOW = hex('#c3e0ec');
+
+  /* ==========================================================================
+   * 5. THE THREE FOREGROUND TREES
+   *
+   * Each is authored as: trunk ribbons (hand-placed to match the reference),
+   * a set of canopy BLOBS that define the silhouette, and a leaf budget. The
+   * branch network between them is grown, not drawn — see buildTree().
+   *
+   * Species assignment follows the painting, and it happens to be exactly the
+   * model's three: the left tree is the reddest thing in the frame, which is
+   * the maple (anthoPotential 1.00); the crown over the trail is orange, which
+   * is the oak (0.55); the right-hand grove has white bark and yellow leaves,
+   * which is aspen and could not be anything else.
+   * ========================================================================*/
+  var TREE_SPECS = [
+    {
+      key: 'left', species: 'bigtoothMaple', label: 'Left of the trail',
+      bark: 'maple', leafSize: [17, 27], budget: 2700,
+      trunks: [
+        { pts: [[176, 902], [186, 702], [196, 596], [206, 498], [214, 420]], w: [46, 39, 32, 25, 18] }
+      ],
+      // silhouette: fills the left edge top to bottom, deepest at the top
+      blobs: [[40, 118, 250, 172], [196, 250, 210, 158], [66, 320, 214, 162],
+              [246, 430, 176, 146], [96, 486, 196, 154], [318, 250, 152, 124],
+              [176, 596, 168, 132], [56, 646, 156, 126], [332, 428, 142, 120],
+              [-30, 232, 180, 150], [268, 130, 158, 122], [252, 622, 130, 104],
+              [150, 700, 176, 108], [30, 720, 160, 100], [268, 706, 130, 88]]
+    },
+    {
+      key: 'crown', species: 'gambelOak', label: 'Over the trail',
+      bark: 'maple', leafSize: [15, 24], budget: 1600,
+      trunks: [
+        { pts: [[566, 926], [546, 736], [526, 602], [498, 472], [466, 338], [436, 198], [414, 44], [406, -40]],
+          w: [86, 78, 70, 61, 51, 41, 32, 28] },
+        { pts: [[654, 924], [670, 748], [680, 632], [692, 508], [702, 378], [710, 230], [716, 78], [720, -40]],
+          w: [72, 65, 59, 51, 43, 35, 28, 24] },
+        { pts: [[614, 918], [602, 772], [586, 688], [562, 606], [536, 548]], w: [38, 33, 28, 22, 16] }
+      ],
+      // the wide orange band across the top of the frame, plus the two masses
+      // that hang down either side of the trunks
+      blobs: [[500, 92, 260, 150], [742, 78, 250, 140], [980, 88, 216, 122],
+              [300, 156, 190, 128], [640, 246, 232, 140], [872, 226, 190, 118],
+              [468, 428, 186, 148], [744, 494, 176, 142], [400, 572, 152, 122],
+              [1140, 132, 168, 110], [178, 268, 148, 116], [860, 396, 150, 118],
+              [612, 620, 132, 104]]
+    },
+    {
+      key: 'grove', species: 'aspen', label: 'Right-hand grove',
+      bark: 'aspen', leafSize: [16, 26], budget: 5600,
+      trunks: [
+        { pts: [[1332, 900], [1330, 700], [1327, 500], [1324, 300], [1322, 100], [1321, -40]], w: [21, 20, 19, 18, 17, 16] },
+        { pts: [[1392, 900], [1396, 690], [1400, 480], [1404, 270], [1408, 60], [1410, -40]], w: [27, 26, 24, 23, 21, 20] },
+        { pts: [[1452, 900], [1449, 720], [1446, 540], [1443, 360], [1440, 180], [1439, -40]], w: [18, 17, 16, 15, 14, 13] },
+        { pts: [[1518, 900], [1523, 680], [1528, 460], [1533, 240], [1537, 20], [1539, -40]], w: [32, 30, 29, 27, 25, 24] },
+        { pts: [[1584, 900], [1582, 690], [1580, 480], [1578, 270], [1576, 60], [1575, -40]], w: [16, 15, 14, 14, 13, 12] }
+      ],
+      blobs: [[1518, 104, 168, 116], [1356, 168, 140, 100], [1206, 112, 128, 92],
+              [1552, 356, 152, 122], [1420, 404, 130, 106], [1540, 574, 138, 114],
+              [1318, 536, 110, 92], [1466, 672, 116, 94], [1264, 288, 104, 86],
+              [1596, 222, 118, 96], [1372, 742, 96, 76], [1462, 236, 112, 90],
+              [1580, 470, 120, 96], [1352, 640, 100, 82]]
+    }
+  ];
+
+  /* ==========================================================================
+   * 6. SCENE STATE
+   * ========================================================================*/
+  var sc = {
+    seed: 20251007,
+    day: 0, doy: M.START_DOY,
+    env: null,
+    controls: Object.assign({}, M.DEFAULT_CONTROLS),
+    density: 1,
+    trees: [],
+    proxies: {},          // the distant forest's stand-in leaves, same model
+    falling: [],
+    pending: [],
+    playing: false,
+    speed: 1,
+    dayT: 1,              // 0..1 progress through the current simulated day
+    loop: true,
+    gust: 0, gustPhase: 0, silent: false,
+    weatherRng: null, leafRng: null, fxRng: null
+  };
+
+  var DAY_MS = 700;       // wall-clock length of one simulated day at 1x
+
+  // Layers. Sky is static; the distant valley repaints as the model turns it;
+  // litter is written once per landed leaf and never cleared until reset.
+  var skyLay = null, valLay = null, litLay = null, trunkLay = null;
+  var valDirtyDay = -999;
+
+  /* ==========================================================================
+   * 7. BACKGROUND — sky, range, valley, trail
+   *
+   * The distant forest is not painted from a palette. It samples PROXY leaves
+   * that are stepped through the same environment as the foreground trees, so
+   * the whole valley turns and thins on the model's schedule too; it just does
+   * it a crown at a time instead of a leaf at a time.
+   * ========================================================================*/
+  /* A trunk is a ribbon: a centre-line with a width at each station. Bark
+   * shading is then just NARROWER ribbons laid inside the same centre-line.
+   *
+   * This is why the lit and shaded faces are built this way and not from a
+   * linear gradient across the trunk's bounding box: the centre tree leans
+   * nearly 200 px between its base and the top of the frame, and a gradient
+   * anchored on the base leaves the whole upper trunk clamped to one end
+   * colour. Offsetting along the local normal follows the lean for free.  */
+  function normalAt(pts, i) {
+    var a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    var dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    return [-dy / L, dx / L];
+  }
+  // u, v are lateral positions in [-0.5, 0.5] as a fraction of the local width.
+  function subRibbon(g, pts, ws, u, v) {
+    var i, n = pts.length, nm;
+    g.beginPath();
+    for (i = 0; i < n; i++) {
+      nm = normalAt(pts, i);
+      var x = pts[i][0] + nm[0] * ws[i] * u, y = pts[i][1] + nm[1] * ws[i] * u;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    for (i = n - 1; i >= 0; i--) {
+      nm = normalAt(pts, i);
+      g.lineTo(pts[i][0] + nm[0] * ws[i] * v, pts[i][1] + nm[1] * ws[i] * v);
+    }
+    g.closePath();
+  }
+  function ribbon(g, pts, ws) { subRibbon(g, pts, ws, -0.5, 0.5); }
+
+  function fillRidge(g, pts, colTop, colBot, bottomY) {
+    g.beginPath();
+    g.moveTo(pts[0][0], bottomY);
+    for (var i = 0; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+    g.lineTo(pts[pts.length - 1][0], bottomY);
+    g.closePath();
+    var gr = g.createLinearGradient(0, pts[0][1] - 60, 0, bottomY);
+    gr.addColorStop(0, css(colTop)); gr.addColorStop(1, css(colBot));
+    g.fillStyle = gr; g.fill();
+  }
+
+  function bakeSky() {
+    skyLay = newLayer();
+    var g = skyLay.g;
+    var rng = M.makeRng(4242);
+
+    // --- sky -------------------------------------------------------------
+    var gr = g.createLinearGradient(0, 0, 0, 520);
+    gr.addColorStop(0, css(SKY_TOP));
+    gr.addColorStop(0.55, css(SKY_MID));
+    gr.addColorStop(1, css(SKY_LOW));
+    g.fillStyle = gr; g.fillRect(0, 0, VW, 520);
+
+    // --- clouds: flat lens shapes, the way the reference draws them -------
+    function cloud(x, y, w, h, a) {
+      g.save();
+      g.globalAlpha = a;
+      g.fillStyle = '#ffffff';
+      var lobes = 5 + Math.floor(rng() * 3);
+      for (var i = 0; i < lobes; i++) {
+        var t = i / (lobes - 1);
+        var lx = x + (t - 0.5) * w;
+        var ly = y - Math.sin(t * Math.PI) * h * 0.45 + (rng() - 0.5) * h * 0.2;
+        var lr = h * (0.42 + Math.sin(t * Math.PI) * 0.55);
+        g.beginPath(); g.ellipse(lx, ly, lr * 1.35, lr * 0.72, 0, 0, 6.2832); g.fill();
+      }
+      g.beginPath(); g.ellipse(x, y + h * 0.05, w * 0.52, h * 0.3, 0, 0, 6.2832); g.fill();
+      g.restore();
+    }
+    cloud(958, 176, 250, 46, 0.94);
+    cloud(1128, 214, 180, 32, 0.72);
+    cloud(806, 132, 130, 24, 0.55);
+    cloud(1300, 150, 150, 26, 0.4);
+
+    // --- far blue wall on the right --------------------------------------
+    fillRidge(g, FARWALL, hex('#8fa4c4'), hex('#a9bad3'), 560);
+
+    // --- main snow range --------------------------------------------------
+    fillRidge(g, RIDGE, hex('#8395b3'), hex('#6d80a1'), 560);
+
+    // snowfields: clipped to the range, jagged bottom edge, fingers running
+    // down the couloirs
+    g.save();
+    g.beginPath();
+    g.moveTo(RIDGE[0][0], 560);
+    for (var i = 0; i < RIDGE.length; i++) g.lineTo(RIDGE[i][0], RIDGE[i][1]);
+    g.lineTo(RIDGE[RIDGE.length - 1][0], 560);
+    g.closePath(); g.clip();
+
+    g.fillStyle = '#f4f8fc';
+    g.beginPath();
+    g.moveTo(540, 120);
+    for (var x = 540; x <= 1420; x += 14) {
+      var ry = polyY(RIDGE, x);
+      var depth = 46 + 42 * Math.sin(x * 0.021) + 30 * Math.sin(x * 0.061 + 1.7)
+                + (rng() - 0.5) * 26;
+      // Snow stops at a treeline, not at an arbitrary depth below each summit,
+      // so the fingers running down the couloirs all end at roughly one height.
+      g.lineTo(x, Math.min(372, ry + Math.max(6, depth)));
+    }
+    g.lineTo(1420, 120); g.closePath(); g.fill();
+
+    // Rock showing through the snow, drawn as thin ribs running DOWN the fall
+    // line. An earlier version used broad wedges and every one of them read as
+    // a little dark conifer standing on the summit.
+    g.strokeStyle = 'rgba(104,120,148,0.55)';
+    g.lineCap = 'round';
+    for (var k = 0; k < 40; k++) {
+      var rx = 556 + rng() * 830;
+      var ry2 = polyY(RIDGE, rx) + 6 + rng() * 22;
+      var rh = 14 + rng() * 34;
+      g.lineWidth = 1.2 + rng() * 2.6;
+      g.beginPath();
+      g.moveTo(rx, ry2);
+      g.quadraticCurveTo(rx + (rng() - 0.5) * 12, ry2 + rh * 0.55,
+                         rx + (rng() - 0.5) * 22, ry2 + rh);
+      g.stroke();
+    }
+    // the shaded flank falling away to the right of each summit
+    g.fillStyle = 'rgba(92,110,142,0.26)';
+    for (var sI = 0; sI < RIDGE.length - 1; sI++) {
+      if (RIDGE[sI + 1][1] > RIDGE[sI][1]) continue;
+      g.beginPath();
+      g.moveTo(RIDGE[sI][0], RIDGE[sI][1]);
+      g.lineTo(RIDGE[sI + 1][0], RIDGE[sI + 1][1]);
+      g.lineTo(RIDGE[sI + 1][0] + 14, RIDGE[sI + 1][1] + 130);
+      g.lineTo(RIDGE[sI][0] + 6, RIDGE[sI][1] + 96);
+      g.closePath(); g.fill();
+    }
+    g.restore();
+
+    // --- nearer spur, no snow, hazier ------------------------------------
+    fillRidge(g, SPUR, hex('#6a7f9c'), hex('#5b7189'), 560);
+    g.save();
+    g.beginPath();
+    g.moveTo(SPUR[0][0], 560);
+    for (var j = 0; j < SPUR.length; j++) g.lineTo(SPUR[j][0], SPUR[j][1]);
+    g.lineTo(SPUR[SPUR.length - 1][0], 560); g.closePath(); g.clip();
+    g.strokeStyle = 'rgba(44,60,78,0.22)';
+    g.lineWidth = 3;
+    for (var d = 0; d < 30; d++) {
+      var dx = 520 + rng() * 1200, dy = polyY(SPUR, dx);
+      g.beginPath(); g.moveTo(dx, dy + 4);
+      g.lineTo(dx + (rng() - 0.5) * 40, dy + 40 + rng() * 60);
+      g.stroke();
+    }
+    g.restore();
+
+    // --- the dark conifer band that separates range from valley -----------
+    var cg = g.createLinearGradient(0, 440, 0, 520);
+    cg.addColorStop(0, '#3f5e57'); cg.addColorStop(1, '#2f4b47');
+    g.fillStyle = cg;
+    g.beginPath();
+    g.moveTo(-100, 560);
+    for (var cx2 = -100; cx2 <= 1700; cx2 += 11) {
+      var base = polyY(SLOPE, cx2);
+      var spike = (cx2 % 33 < 11) ? 15 : (cx2 % 33 < 22 ? 7 : 20);
+      g.lineTo(cx2, base - spike - rng() * 8);
+    }
+    g.lineTo(1700, 560); g.closePath(); g.fill();
+
+    // --- atmospheric haze over everything distant -------------------------
+    var hz = g.createLinearGradient(0, 180, 0, 540);
+    hz.addColorStop(0, 'rgba(196,224,238,0.00)');
+    hz.addColorStop(1, 'rgba(196,224,238,0.30)');
+    g.fillStyle = hz; g.fillRect(0, 180, VW, 360);
+  }
+
+  /* --------------------------------------------------------------------------
+   * The valley: hundreds of small crowns, all coloured from proxy leaves, plus
+   * the trail and the near ground. Repainted when the model has moved the
+   * proxies far enough to be worth it.
+   * ------------------------------------------------------------------------*/
+  function proxyColor(species, idx) {
+    var arr = sc.proxies[species];
+    var leaf = arr[idx % arr.length];
+    return leaf.rgb;
+  }
+  function proxyFallen(species) {
+    var arr = sc.proxies[species], n = 0;
+    for (var i = 0; i < arr.length; i++) if (!arr[i].attached) n++;
+    return n / arr.length;
+  }
+
+  function bakeValley() {
+    if (!valLay) valLay = newLayer();
+    clearLayer(valLay);
+    var g = valLay.g;
+    var rng = M.makeRng(sc.seed ^ 0x5bf03635);
+
+    var haze = hex('#bcd8e6');
+    var sp = ['aspen', 'gambelOak', 'bigtoothMaple'];
+    var bare = { aspen: proxyFallen('aspen'), gambelOak: proxyFallen('gambelOak'),
+                 bigtoothMaple: proxyFallen('bigtoothMaple') };
+
+    /* --- the valley of aspen ---------------------------------------------
+     * Painted in four depth bands, back to front. Each band gets a stronger
+     * colour and a bigger crown; the haze mix is the only thing here that is
+     * a pure painting decision. Which colour is being hazed comes from the
+     * model, including the bare fraction, which is why the far slope goes
+     * grey-brown and thins from the top down as the season runs out. */
+    /* An opaque valley floor FIRST. The crowns are scattered blobs and never
+     * tile the slope completely; without a floor under them the gaps fall
+     * through every layer to the page background, which reads as holes torn in
+     * the hillside. Its colour is the proxies' too — averaged and dropped into
+     * shadow — so the floor between the trees darkens and browns on the same
+     * schedule as the trees standing on it. */
+    var avg = [0, 0, 0], keys = ['bigtoothMaple', 'gambelOak', 'aspen'];
+    for (var q = 0; q < keys.length; q++) {
+      var pc = proxyColor(keys[q], 3);
+      avg[0] += pc[0] / 3; avg[1] += pc[1] / 3; avg[2] += pc[2] / 3;
+    }
+    avg = [Math.round(avg[0]), Math.round(avg[1]), Math.round(avg[2])];
+    var floor = mix(shade(avg, 0.52), hex('#5c4a1e'), 0.40);
+    var fg = g.createLinearGradient(0, 392, 0, VH);
+    fg.addColorStop(0, css(mix(floor, haze, 0.40)));
+    fg.addColorStop(0.45, css(mix(floor, haze, 0.12)));
+    fg.addColorStop(1, css(shade(floor, 0.82)));
+    g.fillStyle = fg;
+    g.fillRect(-100, 392, VW + 200, VH - 352);
+
+    /* A grassy corridor along the trail, painted BEFORE the crowns.
+     * Without it the trail was a pale ramp with 40-px crowns pressed against
+     * both edges, so it read as a causeway raised above the forest instead of
+     * as a path worn through a meadow. The corridor is just the trail polygon
+     * widened, and the crowns are then kept out of it. */
+    var meadow = mix(hex('#9a9445'), hex('#b09a52'), 0.45);
+    g.beginPath();
+    g.moveTo(TRAIL[0][0] - TRAIL[0][2] * 1.7, TRAIL[0][1]);
+    for (var mi = 0; mi < TRAIL.length; mi++) {
+      g.lineTo(TRAIL[mi][0] - TRAIL[mi][2] * 1.7 - 22, TRAIL[mi][1]);
+    }
+    for (var mj = TRAIL.length - 1; mj >= 0; mj--) {
+      g.lineTo(TRAIL[mj][0] + TRAIL[mj][2] * 1.7 + 22, TRAIL[mj][1]);
+    }
+    g.closePath();
+    var mg = g.createLinearGradient(0, 600, 0, VH);
+    mg.addColorStop(0, css(mix(meadow, haze, 0.28)));
+    mg.addColorStop(1, css(shade(meadow, 1.05)));
+    g.fillStyle = mg; g.fill();
+
+    var bands = [
+      { y0: 392, y1: 456, n: 380, r: [8, 15],  haze: 0.34, x0: -60, x1: 1700 },
+      { y0: 440, y1: 522, n: 330, r: [13, 24], haze: 0.26, x0: -60, x1: 1700 },
+      { y0: 500, y1: 620, n: 270, r: [19, 36], haze: 0.13, x0: -60, x1: 1700 },
+      { y0: 586, y1: 764, n: 215, r: [27, 52], haze: 0.04, x0: -60, x1: 1700 }
+    ];
+
+    for (var b = 0; b < bands.length; b++) {
+      var bd = bands[b];
+      for (var i = 0; i < bd.n; i++) {
+        var x = bd.x0 + rng() * (bd.x1 - bd.x0);
+        var y = bd.y0 + rng() * (bd.y1 - bd.y0);
+        // the trail corridor keeps the valley open where the path runs
+        var tw = trailHalfWidth(y);
+        if (tw > 0 && Math.abs(x - trailCenter(y)) < tw * 1.7 + 26) continue;
+        if (y > groundY(x) - 26) continue;
+
+        var species = sp[(i + b) % 3];
+        // a handful of conifers stay green all season — the model has no
+        // evergreen, so they are painted, and they are deliberately few
+        var conifer = rng() < 0.045;
+        var r = bd.r[0] + rng() * (bd.r[1] - bd.r[0]);
+        var col;
+        if (conifer) {
+          col = mix(hex('#2f5142'), haze, bd.haze);
+        } else {
+          col = mix(proxyColor(species, i * 7 + b), haze, bd.haze);
+          if (rng() < bare[species] * 0.75) col = mix(col, hex('#9c7434'), 0.55); // dropped
+        }
+        drawCrown(g, x, y, r, col, rng, bd.haze, conifer, bare[species]);
+      }
+    }
+
+    // --- the trail --------------------------------------------------------
+    var dirt = hex('#c49a6c'), dirtLit = hex('#e2c096'), dirtDk = hex('#9a744c');
+    g.beginPath();
+    g.moveTo(TRAIL[0][0] - TRAIL[0][2], TRAIL[0][1]);
+    for (var t = 0; t < TRAIL.length; t++) g.lineTo(TRAIL[t][0] - TRAIL[t][2], TRAIL[t][1]);
+    for (var t2 = TRAIL.length - 1; t2 >= 0; t2--) g.lineTo(TRAIL[t2][0] + TRAIL[t2][2], TRAIL[t2][1]);
+    g.closePath();
+    var tg = g.createLinearGradient(0, 600, 0, 900);
+    tg.addColorStop(0, css(mix(dirt, haze, 0.35)));
+    tg.addColorStop(1, css(dirtLit));
+    g.fillStyle = tg; g.fill();
+
+    g.save(); g.clip();
+    // wheel-rut style tonal bands and scattered stones
+    g.fillStyle = css(dirtDk, 0.20);
+    for (var r2 = 0; r2 < 26; r2++) {
+      var ry3 = 610 + rng() * 290;
+      var cxr = trailCenter(ry3) + (rng() - 0.5) * trailHalfWidth(ry3) * 1.6;
+      var rw2 = 14 + rng() * 70, rh2 = 4 + rng() * 12;
+      g.beginPath(); g.ellipse(cxr, ry3, rw2, rh2, 0, 0, 6.2832); g.fill();
+    }
+    g.fillStyle = css(hex('#f0dcc0'), 0.35);
+    for (var r3 = 0; r3 < 22; r3++) {
+      var ry4 = 640 + rng() * 250;
+      var cxr2 = trailCenter(ry4) + (rng() - 0.5) * trailHalfWidth(ry4) * 1.2;
+      g.beginPath(); g.ellipse(cxr2, ry4, 10 + rng() * 46, 3 + rng() * 8, 0, 0, 6.2832); g.fill();
+    }
+    g.fillStyle = css(hex('#8c8f92'), 0.55);
+    for (var st = 0; st < 40; st++) {
+      var sy = 620 + rng() * 280;
+      var sx = trailCenter(sy) + (rng() - 0.5) * trailHalfWidth(sy) * 1.7;
+      g.beginPath(); g.ellipse(sx, sy, 2 + rng() * 6, 1.5 + rng() * 4, rng() * 3, 0, 6.2832); g.fill();
+    }
+    g.restore();
+
+    // --- near ground, both sides of the trail -----------------------------
+    var grass = mix(hex('#6f7f36'), hex('#8d9440'), 0.5);
+    g.beginPath();
+    g.moveTo(-100, VH + 40);
+    for (var gx = -100; gx <= 1700; gx += 20) g.lineTo(gx, groundY(gx) - 6);
+    g.lineTo(1700, VH + 40); g.closePath();
+    var gg = g.createLinearGradient(0, 700, 0, VH);
+    gg.addColorStop(0, css(shade(grass, 0.86)));
+    gg.addColorStop(1, css(shade(grass, 1.16)));
+    g.fillStyle = gg; g.fill();
+
+    // Undergrowth. Its colour is the model's too: the shrubs are the same
+    // three species at ankle height, so they turn on the same clock.
+    for (var u = 0; u < 620; u++) {
+      var ux = -80 + rng() * 1780;
+      var uy = groundY(ux) + rng() * 190;
+      if (uy > VH + 30) continue;
+      var thw = trailHalfWidth(uy);
+      if (thw > 0 && Math.abs(ux - trailCenter(uy)) < thw * 0.92) continue;
+      var near = clamp((uy - 700) / 200, 0, 1);
+      var us = 6 + near * 20 + rng() * 14;
+      var pick = sp[u % 3];
+      var ucol = rng() < 0.42
+        ? mix(hex('#4e6b2c'), hex('#7d8f38'), rng())          // still-green herb layer
+        : mix(proxyColor(pick, u * 3), haze, 0.05);
+      drawShrub(g, ux, uy, us, ucol, rng);
+    }
+
+    // rocks along the trail, exactly where the reference puts them
+    var rocks = [[560, 786, 34, 20], [592, 800, 22, 13], [900, 856, 40, 22],
+                 [1160, 762, 30, 17], [1236, 748, 20, 12], [318, 806, 26, 15],
+                 [1058, 800, 26, 15]];
+    for (var rk = 0; rk < rocks.length; rk++) drawRock(g, rocks[rk], rng);
+
+    // grass blades catching the low sun along the trail edge
+    g.lineCap = 'round';
+    for (var bl = 0; bl < 420; bl++) {
+      var bx = -60 + rng() * 1720;
+      var by = groundY(bx) + rng() * 170;
+      if (by > VH) continue;
+      var bhw = trailHalfWidth(by);
+      if (bhw > 0 && Math.abs(bx - trailCenter(by)) < bhw * 0.98) continue;
+      var bh = 8 + rng() * 26;
+      g.strokeStyle = css(mix(hex('#96a341'), hex('#d8c14a'), rng()), 0.65);
+      g.lineWidth = 1 + rng() * 1.6;
+      g.beginPath(); g.moveTo(bx, by);
+      g.quadraticCurveTo(bx + (rng() - 0.5) * 10, by - bh * 0.6, bx + (rng() - 0.5) * 22, by - bh);
+      g.stroke();
+    }
+  }
+
+  // A distant crown: a clump of overlapping flat blobs plus a hinted trunk.
+  function drawCrown(g, x, y, r, col, rng, hazeAmt, conifer, bareFrac) {
+    var trunkCol = mix(conifer ? hex('#40382e') : hex('#d9d3c2'), hex('#bcd8e6'), hazeAmt);
+    g.strokeStyle = css(trunkCol, conifer ? 0.8 : 0.45);
+    g.lineWidth = Math.max(0.8, r * 0.10);
+    g.beginPath(); g.moveTo(x, y + r * 0.5); g.lineTo(x + r * 0.06, y + r * 1.5); g.stroke();
+
+    if (conifer) {
+      g.fillStyle = css(col);
+      for (var t = 0; t < 3; t++) {
+        var ty = y + r * 0.5 - t * r * 0.55, tw = r * (1 - t * 0.24);
+        g.beginPath();
+        g.moveTo(x, ty - r * 0.95); g.lineTo(x + tw * 0.62, ty + r * 0.1);
+        g.lineTo(x - tw * 0.62, ty + r * 0.1); g.closePath(); g.fill();
+      }
+      return;
+    }
+    // deciduous: 5-8 lobes, thinning as the model empties the canopy
+    var lobes = Math.max(3, Math.round((7 - bareFrac * 4) + rng() * 2));
+    g.fillStyle = css(col);
+    for (var i = 0; i < lobes; i++) {
+      var a = (i / lobes) * 6.2832 + rng() * 0.7;
+      var d = r * (0.18 + rng() * 0.42);
+      var lr = r * (0.42 + rng() * 0.34) * (1 - bareFrac * 0.35);
+      g.beginPath();
+      g.ellipse(x + Math.cos(a) * d, y + Math.sin(a) * d * 0.78, lr, lr * 0.86, 0, 0, 6.2832);
+      g.fill();
+    }
+    g.fillStyle = css(shade(col, 1.14), 0.5);
+    g.beginPath();
+    g.ellipse(x - r * 0.28, y - r * 0.3, r * 0.42, r * 0.34, 0, 0, 6.2832);
+    g.fill();
+  }
+
+  function drawShrub(g, x, y, s, col, rng) {
+    g.fillStyle = css(col);
+    var n = 4 + Math.floor(rng() * 4);
+    for (var i = 0; i < n; i++) {
+      var a = (i / n) * 6.2832 + rng();
+      g.beginPath();
+      g.ellipse(x + Math.cos(a) * s * 0.42, y + Math.sin(a) * s * 0.3 - s * 0.25,
+                s * (0.4 + rng() * 0.3), s * (0.32 + rng() * 0.24), 0, 0, 6.2832);
+      g.fill();
+    }
+    g.fillStyle = css(shade(col, 0.7), 0.45);
+    g.beginPath();
+    g.ellipse(x + s * 0.2, y + s * 0.06, s * 0.42, s * 0.24, 0, 0, 6.2832);
+    g.fill();
+  }
+
+  function drawRock(g, r, rng) {
+    var x = r[0], y = r[1], w = r[2], h = r[3];
+    g.beginPath();
+    var n = 7;
+    for (var i = 0; i < n; i++) {
+      var a = (i / n) * 6.2832;
+      var rr = 1 + (rng() - 0.5) * 0.3;
+      var px = x + Math.cos(a) * w * rr, py = y - Math.sin(a) * h * rr * (a < 3.14 ? 1 : 0.4);
+      i ? g.lineTo(px, py) : g.moveTo(px, py);
+    }
+    g.closePath();
+    g.fillStyle = css(hex('#9aa1a8')); g.fill();
+    g.strokeStyle = css(hex('#6b727a'), 0.8); g.lineWidth = 1.6; g.stroke();
+    g.fillStyle = css(hex('#c3c9ce'), 0.6);
+    g.beginPath();
+    g.ellipse(x - w * 0.25, y - h * 0.45, w * 0.4, h * 0.34, -0.3, 0, 6.2832);
+    g.fill();
+  }
+
+  function trailCenter(y) {
+    for (var i = 1; i < TRAIL.length; i++) {
+      if (y >= TRAIL[i][1]) {
+        var t = (y - TRAIL[i][1]) / (TRAIL[i - 1][1] - TRAIL[i][1]);
+        return lerp(TRAIL[i][0], TRAIL[i - 1][0], t);
+      }
+    }
+    return TRAIL[TRAIL.length - 1][0];
+  }
+  function trailHalfWidth(y) {
+    if (y < TRAIL[TRAIL.length - 1][1]) return 0;
+    for (var i = 1; i < TRAIL.length; i++) {
+      if (y >= TRAIL[i][1]) {
+        var t = (y - TRAIL[i][1]) / (TRAIL[i - 1][1] - TRAIL[i][1]);
+        return lerp(TRAIL[i][2], TRAIL[i - 1][2], t);
+      }
+    }
+    return 0;
+  }
+
+  /* ==========================================================================
+   * 8. BUILDING A FOREGROUND TREE
+   *
+   * Trunks are authored. Everything above them is grown:
+   *
+   *  1. Cluster centres are rejection-sampled inside the authored canopy
+   *     BLOBS, so the silhouette is the reference's silhouette.
+   *  2. Branches are grown by greedy nearest-node attachment: clusters are
+   *     taken in order of distance from the trunk base, and each connects to
+   *     whichever existing node is cheapest to reach — cost being distance
+   *     penalised by how far the new twig would have to turn away from the
+   *     direction its parent was already going. That penalty is what makes
+   *     the result look like a tree instead of a bicycle wheel, and it costs
+   *     one dot product.
+   *  3. Leaves are scattered around each cluster centre.
+   *
+   * Each leaf then gets its own model leaf. Nothing about its colour, its
+   * timing, or when it lets go is decided in this file.
+   * ========================================================================*/
+  function sampleTrunk(tr, t) {
+    var n = tr.pts.length - 1;
+    var f = clamp(t, 0, 1) * n;
+    var i = Math.min(n - 1, Math.floor(f));
+    var u = f - i;
+    return {
+      x: lerp(tr.pts[i][0], tr.pts[i + 1][0], u),
+      y: lerp(tr.pts[i][1], tr.pts[i + 1][1], u),
+      w: lerp(tr.w[i], tr.w[i + 1], u)
+    };
+  }
+
+  function buildTree(spec, rng) {
+    var t = {
+      spec: spec, key: spec.key, species: spec.species, label: spec.label,
+      leaves: [], nodes: [], segs: [], clusters: []
+    };
+
+    // --- 1. cluster centres inside the authored silhouette ----------------
+    var blobs = spec.blobs;
+    var area = 0, i, b;
+    for (i = 0; i < blobs.length; i++) area += blobs[i][2] * blobs[i][3];
+    var nClusters = Math.round(spec.budget * sc.density / 34);
+    var guard = 0;
+    while (t.clusters.length < nClusters && guard++ < nClusters * 40) {
+      // pick a blob in proportion to its area, then a point inside it
+      var pick = rng() * area, acc = 0;
+      for (i = 0; i < blobs.length; i++) { acc += blobs[i][2] * blobs[i][3]; if (acc >= pick) break; }
+      b = blobs[Math.min(i, blobs.length - 1)];
+      var a = rng() * 6.2832, rr = Math.sqrt(rng());
+      var cx = b[0] + Math.cos(a) * b[2] * rr;
+      var cy = b[1] + Math.sin(a) * b[3] * rr;
+      // feather the edge so the silhouette is ragged, not elliptical
+      if (rr > 0.80 && rng() < (rr - 0.80) / 0.20 * 0.7) continue;
+      if (cy > groundY(cx) - 70) continue;
+      if (cx < -220 || cx > VW + 220 || cy < -180) continue;
+      t.clusters.push({ x: cx, y: cy, n: 0 });
+    }
+
+    // --- 2. grow the branch network ---------------------------------------
+    for (i = 0; i < spec.trunks.length; i++) {
+      var tr = spec.trunks[i];
+      // seed nodes from 30% of the way up each trunk to its tip
+      for (var s = 0.30; s <= 1.0001; s += 0.10) {
+        var p = sampleTrunk(tr, s);
+        var up = sampleTrunk(tr, Math.min(1, s + 0.06));
+        var dx = up.x - p.x, dy = up.y - p.y, L = Math.hypot(dx, dy) || 1;
+        t.nodes.push({ x: p.x, y: p.y, dx: dx / L, dy: dy / L, w: p.w * 0.55, depth: 0 });
+      }
+    }
+
+    var base = spec.trunks[0].pts[0];
+    t.clusters.sort(function (p, q) {
+      return Math.hypot(p.x - base[0], p.y - base[1]) - Math.hypot(q.x - base[0], q.y - base[1]);
+    });
+
+    for (var c = 0; c < t.clusters.length; c++) {
+      var cl = t.clusters[c];
+      var best = -1, bestCost = Infinity;
+      for (var n = 0; n < t.nodes.length; n++) {
+        var nd = t.nodes[n];
+        var vx = cl.x - nd.x, vy = cl.y - nd.y;
+        var d = Math.hypot(vx, vy);
+        if (d < 6) continue;
+        var align = (vx / d) * nd.dx + (vy / d) * nd.dy;      // 1 = straight on
+        // turning away is expensive; going backwards is very expensive
+        var cost = d * (1 + 1.35 * (1 - align)) + nd.depth * 18;
+        if (cost < bestCost) { bestCost = cost; best = n; }
+      }
+      if (best < 0) continue;
+      var par = t.nodes[best];
+      // split the run into two segments with a slight kink, so twigs bend
+      var mx = lerp(par.x, cl.x, 0.55) + (rng() - 0.5) * 26;
+      var my = lerp(par.y, cl.y, 0.55) + (rng() - 0.5) * 26;
+      var w1 = Math.max(1.0, par.w * 0.66);
+      var w2 = Math.max(0.7, w1 * 0.66);
+      t.segs.push({ x0: par.x, y0: par.y, x1: mx, y1: my, w0: par.w, w1: w1 });
+      t.segs.push({ x0: mx, y0: my, x1: cl.x, y1: cl.y, w0: w1, w1: w2 });
+      var d1x = mx - par.x, d1y = my - par.y, L1 = Math.hypot(d1x, d1y) || 1;
+      var d2x = cl.x - mx, d2y = cl.y - my, L2 = Math.hypot(d2x, d2y) || 1;
+      t.nodes.push({ x: mx, y: my, dx: d1x / L1, dy: d1y / L1, w: w1, depth: par.depth + 1 });
+      t.nodes.push({ x: cl.x, y: cl.y, dx: d2x / L2, dy: d2y / L2, w: w2, depth: par.depth + 2 });
+      cl.dir = Math.atan2(d2y, d2x);
+    }
+    t.segs.sort(function (p, q) { return q.w0 - p.w0; });    // thick first
+
+    // --- 3. leaves ---------------------------------------------------------
+    var perCluster = Math.max(4, Math.round(spec.budget * sc.density / Math.max(1, t.clusters.length)));
+    var sz = spec.leafSize;
+    for (var q2 = 0; q2 < t.clusters.length; q2++) {
+      var cc = t.clusters[q2];
+      var k = Math.max(3, Math.round(perCluster * (0.55 + rng() * 0.9)));
+      for (var L3 = 0; L3 < k; L3++) {
+        // gaussian-ish scatter, elongated along the twig that feeds the cluster
+        var ang = rng() * 6.2832;
+        var rad = (rng() + rng() + rng()) / 3;
+        var spread = 46 + rng() * 34;
+        var lx = cc.x + Math.cos(ang) * rad * spread * 1.3;
+        var ly = cc.y + Math.sin(ang) * rad * spread;
+        if (ly > groundY(lx) - 40) continue;
+        if (lx < -46 || lx > VW + 46 || ly < -46) continue;
+        t.leaves.push({
+          hx: lx, hy: ly,                                   // hang point
+          species: spec.species,
+          size: sz[0] + rng() * (sz[1] - sz[0]),
+          // Tip pointing away from the middle of its own cluster, plus a wide
+          // jitter. Leaving every sprite near-upright made each cluster read as
+          // a hanging strand instead of as a spray of foliage.
+          rot: (ang - Math.PI / 2) * 0.65 + (rng() - 0.5) * 2.2,
+          // Aspen leaves flutter because of the flat petiole; the model does
+          // not know that, so the amplitude is authored per species here and
+          // only ever moves a leaf, never recolours it.
+          phase: rng() * 6.2832,
+          amp: 0.10 + rng() * 0.16,
+          // a leaf either sits behind the trunks or in front of them; the
+          // grove reads as a grove only if some yellow crosses the white bark
+          front: rng() < (spec.bark === 'aspen' ? 0.42 : 0.30),
+          // Per-leaf exposure, quantised on purpose: it multiplies the model's
+          // colour, and a continuous multiplier would give every leaf its own
+          // sprite-cache bucket. Seven steps is more variation than the eye
+          // resolves in a canopy and a fortieth of the bitmaps.
+          lit: 0.80 + Math.round(rng() * 6) * 0.057,
+          leaf: null, rgb: [90, 130, 60], pending: false
+        });
+      }
+    }
+    return t;
+  }
+
+  /* --- trunk painting -------------------------------------------------- */
+  function bakeTrunks() {
+    if (!trunkLay) trunkLay = newLayer();
+    clearLayer(trunkLay);
+    var g = trunkLay.g;
+    var rng = M.makeRng(sc.seed ^ 0x1d872b41);
+
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i], spec = t.spec;
+      // branches first, so trunks overlap them at the join
+      var branchCol = spec.bark === 'aspen' ? hex('#4b4438') : hex('#4a3b30');
+      for (var s = 0; s < t.segs.length; s++) {
+        var sg = t.segs[s];
+        g.strokeStyle = css(branchCol, sg.w0 > 3 ? 0.95 : 0.8);
+        g.lineWidth = Math.max(0.8, (sg.w0 + sg.w1) * 0.5);
+        g.lineCap = 'round';
+        g.beginPath();
+        g.moveTo(sg.x0, sg.y0);
+        g.quadraticCurveTo((sg.x0 + sg.x1) * 0.5 + (sg.y1 - sg.y0) * 0.06,
+                           (sg.y0 + sg.y1) * 0.5 - (sg.x1 - sg.x0) * 0.06,
+                           sg.x1, sg.y1);
+        g.stroke();
+      }
+      for (var k = 0; k < spec.trunks.length; k++) {
+        if (spec.bark === 'aspen') drawAspenTrunk(g, spec.trunks[k], rng);
+        else drawBarkTrunk(g, spec.trunks[k], rng);
+      }
+    }
+  }
+
+  function drawBarkTrunk(g, tr, rng) {
+    var pts = tr.pts, ws = tr.w;
+    g.save();
+    ribbon(g, pts, ws);
+    g.fillStyle = '#6b594b'; g.fill();
+    g.clip();
+    // lit face on the left (the canyon's light), core tone, shadow on the right
+    subRibbon(g, pts, ws, -0.50, -0.16); g.fillStyle = '#8f7a68'; g.fill();
+    subRibbon(g, pts, ws, -0.50, -0.36); g.fillStyle = '#a28c78'; g.fill();
+    subRibbon(g, pts, ws,  0.14,  0.50); g.fillStyle = '#463932'; g.fill();
+    subRibbon(g, pts, ws,  0.34,  0.50); g.fillStyle = '#33291f'; g.fill();
+    // vertical bark striations, the reference's signature on these trunks
+    g.lineCap = 'round';
+    for (var i = 0; i < 46; i++) {
+      var t0 = rng(), t1 = Math.min(1, t0 + 0.06 + rng() * 0.22);
+      var a = sampleTrunk(tr, t0), b = sampleTrunk(tr, t1);
+      var off = (rng() - 0.5) * 0.86;
+      g.strokeStyle = rng() < 0.55 ? 'rgba(40,32,26,0.55)' : 'rgba(176,155,134,0.35)';
+      g.lineWidth = 1 + rng() * 3.5;
+      g.beginPath();
+      g.moveTo(a.x + off * a.w, a.y);
+      g.quadraticCurveTo(lerp(a.x, b.x, 0.5) + off * a.w * 1.1, lerp(a.y, b.y, 0.5),
+                         b.x + off * b.w, b.y);
+      g.stroke();
+    }
+    g.restore();
+    ribbon(g, pts, ws);
+    g.strokeStyle = 'rgba(28,22,18,0.85)';
+    g.lineWidth = 2.2; g.lineJoin = 'round'; g.stroke();
+  }
+
+  function drawAspenTrunk(g, tr, rng) {
+    var pts = tr.pts, ws = tr.w;
+    g.save();
+    ribbon(g, pts, ws);
+    g.fillStyle = '#f2eee1'; g.fill();
+    g.clip();
+    subRibbon(g, pts, ws, -0.50, -0.30); g.fillStyle = '#c7c1ae'; g.fill();
+    subRibbon(g, pts, ws, -0.30, -0.08); g.fillStyle = '#e5e0d0'; g.fill();
+    subRibbon(g, pts, ws,  0.10,  0.32); g.fillStyle = '#fdfbf4'; g.fill();
+    subRibbon(g, pts, ws,  0.32,  0.50); g.fillStyle = '#b3ac97'; g.fill();
+    // the green-grey algal cast aspens carry on the shaded side
+    subRibbon(g, pts, ws, -0.50, -0.22);
+    g.fillStyle = 'rgba(150,158,120,0.20)'; g.fill();
+    // horizontal lenticels and the black eye scars where limbs were shed
+    for (var i = 0; i < 26; i++) {
+      var p = sampleTrunk(tr, rng());
+      g.strokeStyle = 'rgba(70,68,58,0.42)';
+      g.lineWidth = 1 + rng() * 1.8;
+      g.beginPath();
+      g.moveTo(p.x - p.w * (0.1 + rng() * 0.35), p.y);
+      g.lineTo(p.x + p.w * (0.1 + rng() * 0.35), p.y + (rng() - 0.5) * 3);
+      g.stroke();
+    }
+    for (var e = 0; e < 3; e++) {
+      var q = sampleTrunk(tr, 0.04 + rng() * 0.92);
+      var ew = q.w * (0.13 + rng() * 0.16), eh = ew * (1.3 + rng() * 1.4);
+      var ex = q.x + (rng() - 0.5) * q.w * 0.5;
+      g.fillStyle = 'rgba(38,36,32,0.88)';
+      g.beginPath();
+      g.moveTo(ex, q.y - eh);
+      g.quadraticCurveTo(ex + ew, q.y - eh * 0.15, ex, q.y + eh * 0.5);
+      g.quadraticCurveTo(ex - ew, q.y - eh * 0.15, ex, q.y - eh);
+      g.closePath(); g.fill();
+      g.fillStyle = 'rgba(120,114,98,0.5)';
+      g.beginPath();
+      g.ellipse(ex, q.y - eh * 0.25, ew * 0.5, eh * 0.32, 0, 0, 6.2832);
+      g.fill();
+    }
+    g.restore();
+    ribbon(g, pts, ws);
+    g.strokeStyle = 'rgba(58,54,44,0.7)';
+    g.lineWidth = 1.6; g.lineJoin = 'round'; g.stroke();
+  }
+
+  /* ==========================================================================
+   * 9. MODEL WIRING
+   *
+   * One environment per day for the whole canyon — the three trees share a sky,
+   * which is the entire point of putting them in the same picture. Then every
+   * leaf in every tree is stepped, and any leaf the model detached today is
+   * queued to fall at some point during the coming day.
+   * ========================================================================*/
+  function buildScene() {
+    var rng = M.makeRng(sc.seed ^ 0x2545f491);
+    sc.trees = [];
+    for (var i = 0; i < TREE_SPECS.length; i++) sc.trees.push(buildTree(TREE_SPECS[i], rng));
+    bakeTrunks();
+    resetSeason();
+  }
+
+  function resetSeason() {
+    sc.day = 0;
+    sc.doy = M.START_DOY;
+    sc.dayT = 1;
+    sc.falling = [];
+    sc.pending = [];
+    sc.weatherRng = M.makeRng(sc.seed ^ 0x9e3779b9);
+    sc.leafRng = M.makeRng(sc.seed ^ 0x85ebca6b);
+    sc.fxRng = M.makeRng(sc.seed ^ 0x27d4eb2d);
+
+    var lrng = M.makeRng(sc.seed ^ 0xc2b2ae35);
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      for (var j = 0; j < t.leaves.length; j++) {
+        var v = t.leaves[j];
+        v.leaf = M.makeLeaf(t.species, lrng);
+        v.rgb = shade(rgbOf(M.leafColor(v.leaf)), v.lit);
+        v.pending = false;
+      }
+    }
+    // proxy leaves for the distant valley — same species, same environment,
+    // 40 of each, which is enough to give the far slope real variation
+    sc.proxies = {};
+    var keys = ['bigtoothMaple', 'gambelOak', 'aspen'];
+    for (var k = 0; k < keys.length; k++) {
+      var arr = [];
+      for (var p = 0; p < 40; p++) {
+        var lf = M.makeLeaf(keys[k], lrng);
+        lf.rgb = rgbOf(M.leafColor(lf));
+        arr.push(lf);
+      }
+      sc.proxies[keys[k]] = arr;
+    }
+
+    if (!litLay) litLay = newLayer(); else clearLayer(litLay);
+    sc.env = M.makeEnvironment(sc.doy, sc.controls, M.makeRng(sc.seed ^ 0x9b1f3c17));
+    valDirtyDay = -999;
+    if (!sc.silent) { bakeValley(); refreshHud(); }
+  }
+
+  function stepDay() {
+    if (sc.day >= M.SEASON_DAYS) return false;
+    sc.doy = M.START_DOY + sc.day;
+    var env = sc.env = M.makeEnvironment(sc.doy, sc.controls, sc.weatherRng);
+
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      for (var j = 0; j < t.leaves.length; j++) {
+        var v = t.leaves[j];
+        var lf = v.leaf;
+        if (!lf.attached) continue;
+        M.stepLeaf(lf, env, sc.leafRng);
+        v.rgb = shade(rgbOf(M.leafColor(lf)), v.lit);
+        if (!lf.attached) {
+          /* The model says this leaf falls TODAY but not at what hour, and a
+           * simulated day is 0.7 s of wall clock. Releasing every one of them
+           * on the frame the day ticks over makes leaves arrive in a pulse, so
+           * each is queued with a release time spread across the coming day and
+           * — the part that matters — stays drawn on its branch until then.
+           * Hiding it at detach time and spawning the particle later would make
+           * the leaf wink out and reappear in mid-air, which is worse. */
+          v.pending = true;
+          sc.pending.push({ v: v, tree: t, wait: sc.leafRng() });
+        }
+      }
+    }
+    for (var k = 0; k < 3; k++) {
+      var key = ['bigtoothMaple', 'gambelOak', 'aspen'][k];
+      var arr = sc.proxies[key];
+      for (var p = 0; p < arr.length; p++) {
+        if (!arr[p].attached) continue;
+        M.stepLeaf(arr[p], env, sc.leafRng);
+        arr[p].rgb = rgbOf(M.leafColor(arr[p]));
+      }
+    }
+
+    sc.day++;
+    if (!sc.silent) {
+      if (sc.day - valDirtyDay >= 2) { valDirtyDay = sc.day; bakeValley(); }
+      refreshHud();
+    }
+    return true;
+  }
+
+  /* --------------------------------------------------------------------------
+   * Advancing without animating — used by the scrubber and by the initial
+   * jump to peak colour. Leaves that fell during the skipped days are stamped
+   * straight into the litter where they would have landed, so the ground is
+   * never inconsistent with the canopy above it.
+   * ------------------------------------------------------------------------*/
+  function fastForwardTo(target) {
+    if (target < sc.day) resetSeason();
+    sc.silent = true;
+    while (sc.day < target && sc.day < M.SEASON_DAYS) {
+      stepDay();
+      for (var i = 0; i < sc.pending.length; i++) {
+        var p = sc.pending[i];
+        p.v.pending = false;
+        stampLitter(p.v.hx + (sc.fxRng() - 0.5) * 220, groundY(p.v.hx) + (sc.fxRng() - 0.5) * 26,
+                    p.v, sc.fxRng() * 6.2832);
+      }
+      sc.pending.length = 0;
+    }
+    sc.silent = false;
+    sc.falling.length = 0;
+    sc.dayT = 1;
+    valDirtyDay = sc.day;
+    bakeValley();
+    refreshHud();
+  }
+
+  /* ==========================================================================
+   * 10. FALLING
+   *
+   * The model decides IF and WHEN. This decides only how it looks on the way
+   * down: an aspen leaf on its flat petiole tumbles more than a heavy oak leaf,
+   * and the day's gust — which the model computed — carries it down-canyon.
+   * ========================================================================*/
+  function release(p) {
+    var v = p.v, t = p.tree;
+    var wind = sc.env ? sc.env.gust : 3;
+    var flut = t.species === 'aspen' ? 1.5 : (t.species === 'bigtoothMaple' ? 1.0 : 0.75);
+    sc.falling.push({
+      v: v, species: t.species,
+      x: v.hx, y: v.hy,
+      vx: (sc.fxRng() - 0.5) * 12,
+      vy: 8 + sc.fxRng() * 14,
+      rot: v.rot, spin: (sc.fxRng() - 0.5) * 3.4 * flut,
+      swing: sc.fxRng() * 6.2832,
+      swingRate: (1.6 + sc.fxRng() * 2.4) * flut,
+      swingAmp: (18 + sc.fxRng() * 34) * flut,
+      drift: wind * (2.4 + sc.fxRng() * 2.2),
+      land: groundY(v.hx) + (sc.fxRng() - 0.5) * 22,
+      fall: 42 + sc.fxRng() * 40
+    });
+    v.pending = false;
+  }
+
+  function stampLitter(x, y, v, rot) {
+    if (!litLay) return;
+    if (x < -60 || x > VW + 60 || y < 0 || y > VH + 40) return;
+    var g = litLay.g;
+    // A leaf on the ground is a leaf seen almost edge-on and going brown, so
+    // it is squashed vertically and dulled. Both are painting; the colour it
+    // is dulling FROM is still the model's.
+    var col = mix(v.rgb, hex('#7d6242'), 0.28);
+    col = [(col[0] >> 5 << 5) + 16, (col[1] >> 5 << 5) + 16, (col[2] >> 5 << 5) + 16];
+    var sp = leafSprite(v.species, Math.round(v.size / 4) * 4, col);
+    g.save();
+    g.globalAlpha = 0.9;
+    g.translate(x, y);
+    g.rotate(rot);
+    g.scale(1, 0.42);
+    drawSprite(g, sp);
+    g.restore();
+  }
+
+  function updateFalling(dt) {
+    var wind = sc.env ? sc.env.gust : 3;
+    var gust = sc.gust;
+    for (var i = sc.falling.length - 1; i >= 0; i--) {
+      var f = sc.falling[i];
+      f.swing += f.swingRate * dt;
+      f.vy += (f.fall - f.vy) * Math.min(1, dt * 2.2);
+      f.x += (f.vx + f.drift * (0.6 + gust * 0.5) + Math.cos(f.swing) * f.swingAmp) * dt;
+      f.y += f.vy * dt;
+      f.rot += f.spin * dt + Math.cos(f.swing) * 0.02;
+      if (f.y >= f.land) {
+        stampLitter(f.x, f.land, f.v, f.rot);
+        sc.falling.splice(i, 1);
+      } else if (f.x < -140 || f.x > VW + 140) {
+        sc.falling.splice(i, 1);
+      }
+    }
+  }
+
+  /* ==========================================================================
+   * 11. RENDER
+   * ========================================================================*/
+  var perfAcc = 0, perfN = 0, lastT = 0, bootMs = '';
+
+  function draw(now) {
+    var dt = lastT ? Math.min(0.05, (now - lastT) / 1000) : 0.016;
+    lastT = now;
+    var t0 = performance.now();
+    atlasResets = 0;
+
+    /* --- advance the clock ---------------------------------------------- */
+    if (sc.playing) {
+      sc.dayT += dt * 1000 / (DAY_MS / sc.speed);
+      while (sc.dayT >= 1) {
+        sc.dayT -= 1;
+        if (!stepDay()) {
+          if (sc.loop) { sc.seed = (sc.seed * 1103515245 + 12345) >>> 0; buildScene(); }
+          else { sc.playing = false; document.getElementById('play').textContent = 'Play'; }
+          break;
+        }
+        syncScrub();
+      }
+      for (var i = sc.pending.length - 1; i >= 0; i--) {
+        if (sc.pending[i].wait <= sc.dayT) { release(sc.pending[i]); sc.pending.splice(i, 1); }
+      }
+    }
+
+    // gust envelope: the model's mean wind, breathing
+    sc.gustPhase += dt * (0.25 + (sc.env ? sc.env.gust : 3) * 0.07);
+    sc.gust = 0.5 + 0.5 * Math.sin(sc.gustPhase) * Math.sin(sc.gustPhase * 0.37 + 1.1);
+    updateFalling(dt);
+
+    /* --- paint ----------------------------------------------------------- */
+    applyView();
+    ctx.clearRect(-VW, -VH, VW * 3, VH * 3);
+    blit(skyLay);
+    blit(valLay);
+    blit(litLay);
+
+    var sway = (sc.env ? clamp(sc.env.gust / 9, 0, 1.3) : 0.3);
+    var tt = now / 1000;
+
+    // back leaves -> trunks and branches -> front leaves. Splitting the canopy
+    // around the bark is what lets the aspen grove read as a grove.
+    drawCanopy(false, tt, sway);
+    blit(trunkLay);
+    drawCanopy(true, tt, sway);
+
+    // falling leaves last: they cross in front of everything
+    for (var f = 0; f < sc.falling.length; f++) {
+      var fl = sc.falling[f];
+      var sp = leafSprite(fl.species, fl.v.size, fl.v.rgb);
+      ctx.save();
+      ctx.translate(fl.x, fl.y);
+      ctx.rotate(fl.rot);
+      // the edge-on flash as it turns over
+      ctx.scale(1, 0.35 + 0.65 * Math.abs(Math.cos(fl.swing * 0.8)));
+      drawSprite(ctx, sp);
+      ctx.restore();
+    }
+
+    // a last breath of canyon haze in the distance and a soft corner vignette
+    var vg = ctx.createRadialGradient(VW * 0.55, VH * 0.42, VH * 0.25, VW * 0.55, VH * 0.42, VH * 1.05);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(24,16,8,0.30)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, VW, VH);
+
+    perfAcc += performance.now() - t0; perfN++;
+    if (perfN >= 60) {
+      var el = document.getElementById('perf');
+      if (el) el.textContent = (perfAcc / perfN).toFixed(1) + ' ms/frame · ' +
+        leafTotal() + ' modelled leaves' + bootMs;
+      perfAcc = 0; perfN = 0;
+    }
+    requestAnimationFrame(draw);
+  }
+
+  function drawCanopy(front, tt, sway) {
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      var isAspen = t.species === 'aspen';
+      for (var j = 0; j < t.leaves.length; j++) {
+        var v = t.leaves[j];
+        if (v.front !== front) continue;
+        if (!v.leaf.attached && !v.pending) continue;
+        // Sway: amplitude from the day's wind, phase from the leaf. Higher in
+        // the canopy moves more, which is why hy scales it.
+        var h = clamp((700 - v.hy) / 700, 0, 1);
+        var a = Math.sin(tt * (1.1 + v.amp * 3) + v.phase) * v.amp * sway * (0.4 + h);
+        var dx = a * 16 * (0.5 + sc.gust);
+        var dy = Math.cos(tt * 1.7 + v.phase) * a * 5;
+        var sp = leafSprite(t.species, v.size, v.rgb);
+        ctx.save();
+        ctx.translate(v.hx + dx, v.hy + dy);
+        ctx.rotate(v.rot + a * (isAspen ? 1.5 : 0.8));
+        drawSprite(ctx, sp);
+        ctx.restore();
+      }
+    }
+  }
+
+  function leafTotal() {
+    var n = 0;
+    for (var i = 0; i < sc.trees.length; i++) n += sc.trees[i].leaves.length;
+    return n;
+  }
+
+  /* ==========================================================================
+   * 12. HUD
+   * ========================================================================*/
+  var $ = function (id) { return document.getElementById(id); };
+
+  function treeStats(t) {
+    var att = 0, col = [0, 0, 0];
+    for (var i = 0; i < t.leaves.length; i++) {
+      var v = t.leaves[i];
+      if (v.leaf.attached) {
+        att++; col[0] += v.rgb[0]; col[1] += v.rgb[1]; col[2] += v.rgb[2];
+      }
+    }
+    var a = att || 1;
+    return {
+      attached: att, total: t.leaves.length,
+      col: [Math.round(col[0] / a), Math.round(col[1] / a), Math.round(col[2] / a)]
+    };
+  }
+
+  function buildLegend() {
+    var host = $('spList');
+    host.innerHTML = '';
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i];
+      var row = document.createElement('div');
+      row.className = 'sp';
+      row.innerHTML = '<span class="sw" data-k="' + t.key + '"></span>' +
+        '<span class="nm">' + M.SPECIES[t.species].name + '<i>' + t.label + '</i></span>' +
+        '<span class="st" data-s="' + t.key + '">&mdash;</span>';
+      host.appendChild(row);
+    }
+  }
+
+  function refreshHud() {
+    var e = sc.env;
+    if (!e) return;
+    $('oDate').textContent = M.doyToLabel(sc.doy);
+    $('oDay').textContent = 'day ' + sc.day + ' / ' + M.SEASON_DAYS;
+    $('oTmin').textContent = e.tMin.toFixed(1) + ' °C';
+    $('oLen').textContent = e.dayLength.toFixed(2) + ' h';
+    $('oSun').textContent = Math.round(e.sun * 100) + ' %';
+    $('oGust').textContent = e.gust.toFixed(1) + ' m/s';
+    $('oFrost').innerHTML = e.hardFreeze
+      ? '<span class="badge freeze">HARD FREEZE</span>'
+      : (e.lightFrost ? '<span class="badge frost">FROST</span>'
+                 : '<span class="badge none">clear</span>');
+
+    var held = 0, tot = 0;
+    for (var i = 0; i < sc.trees.length; i++) {
+      var t = sc.trees[i], s = treeStats(t);
+      held += s.attached; tot += s.total;
+      var sw = document.querySelector('.sw[data-k="' + t.key + '"]');
+      var st = document.querySelector('.st[data-s="' + t.key + '"]');
+      if (sw) sw.style.background = css(s.col);
+      if (st) st.textContent = Math.round(s.attached / (s.total || 1) * 100) + '% held';
+    }
+    $('oHeld').textContent = Math.round(held / (tot || 1) * 100) + ' % of ' + tot;
+  }
+
+  function syncScrub() { $('scrub').value = sc.day; }
+
+  /* --- controls ---------------------------------------------------------- */
+  function bindSlider(id, fmt, apply) {
+    var el = $(id), out = $(id + 'V');
+    function upd() {
+      var v = parseFloat(el.value);
+      out.innerHTML = fmt(v);
+      apply(v);
+    }
+    el.addEventListener('input', upd);
+    upd();
+  }
+
+  function rerunFromControls() {
+    // Weather is a property of the season, not of an instant: changing a slider
+    // has to re-run the season from Aug 1 or the accumulated clocks would be
+    // inconsistent with the sky the leaves supposedly grew under.
+    var d = sc.day;
+    resetSeason();
+    fastForwardTo(d);
+  }
+
+  var pendingRerun = null, booting = true;
+  function queueRerun() {
+    if (booting) return;              // the initial bindSlider pass is not a change
+    clearTimeout(pendingRerun);
+    pendingRerun = setTimeout(rerunFromControls, 160);
+  }
+
+  function boot() {
+    window.addEventListener('resize', resize);
+    resize();
+    buildScene();
+    buildLegend();
+
+    bindSlider('temp', function (v) { return v.toFixed(1) + ' °C'; },
+      function (v) { sc.controls.tempOffset = v; queueRerun(); });
+    bindSlider('winterPrecip', function (v) { return v.toFixed(2) + ' ×'; },
+      function (v) { sc.controls.winterPrecip = v; queueRerun(); });
+    bindSlider('cloud', function (v) { return Math.round(v) + ' %'; },
+      function (v) { sc.controls.cloudCover = v; queueRerun(); });
+    bindSlider('wind', function (v) { return v.toFixed(1) + ' m/s'; },
+      function (v) { sc.controls.windMean = v; queueRerun(); });
+    bindSlider('precip', function (v) { return v.toFixed(2) + ' ×'; },
+      function (v) { sc.controls.precipMult = v; queueRerun(); });
+    bindSlider('lat', function (v) { return v.toFixed(1) + ' °N'; },
+      function (v) { sc.controls.latitude = v; queueRerun(); });
+    bindSlider('dens', function (v) { return v.toFixed(2) + ' ×'; },
+      function (v) {
+        if (Math.abs(v - sc.density) < 0.001) return;
+        sc.density = v;
+        clearTimeout(pendingRerun);
+        pendingRerun = setTimeout(function () { var d = sc.day; buildScene(); fastForwardTo(d); }, 200);
+      });
+    bindSlider('speed', function (v) { return v.toFixed(1) + '×'; },
+      function (v) { sc.speed = v; });
+
+    $('play').addEventListener('click', function () {
+      sc.playing = !sc.playing;
+      this.textContent = sc.playing ? 'Pause' : 'Play';
+    });
+    $('stepBtn').addEventListener('click', function () {
+      sc.playing = false; $('play').textContent = 'Play';
+      stepDay();
+      for (var i = 0; i < sc.pending.length; i++) release(sc.pending[i]);
+      sc.pending.length = 0;
+      syncScrub();
+    });
+    $('scrub').max = M.SEASON_DAYS;
+    $('scrub').addEventListener('input', function () {
+      sc.playing = false; $('play').textContent = 'Play';
+      fastForwardTo(parseInt(this.value, 10));
+    });
+    $('cfg').addEventListener('click', function () { $('panel').classList.toggle('open'); });
+    $('reseed').addEventListener('click', function () {
+      sc.seed = (Math.random() * 4294967295) >>> 0;
+      buildScene(); syncScrub();
+    });
+    $('peakBtn').addEventListener('click', function () { fastForwardTo(peakDay()); syncScrub(); });
+    $('loopSeason').addEventListener('change', function () { sc.loop = this.checked; });
+
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === ' ') { ev.preventDefault(); $('play').click(); }
+      else if (ev.key === 'ArrowRight') $('stepBtn').click();
+      else if (ev.key === 'c') $('cfg').click();
+    });
+
+    /* Open ON the day the canyon looks like the reference.
+     *
+     * The reference is a painting of peak colour, and starting on Aug 1 would
+     * open on a green hillside that looks nothing like it. So the season is
+     * run silently up to the day the model itself puts peak colour — found by
+     * asking the model, not by hard-coding a date, which means it moves when
+     * the weather sliders move. The scrubber still holds the whole season, and
+     * the leaves that fell on the way there are already on the ground. */
+    booting = false;
+    var t0 = performance.now();
+    var pd = peakDay();
+    var t1 = performance.now();
+    fastForwardTo(pd);
+    bootMs = ' · peak ' + M.doyToLabel(M.START_DOY + pd) +
+             ' (probe ' + (t1 - t0).toFixed(0) + ' ms, jump ' +
+             (performance.now() - t1).toFixed(0) + ' ms)';
+    syncScrub();
+    sc.playing = true;
+    $('play').textContent = 'Pause';
+    requestAnimationFrame(draw);
+  }
+
+  /* The day the canyon is at its best.
+   *
+   * NOT the day of maximum aggregate colour: aspen turns in mid-September and
+   * Gambel oak not until October, so the aggregate peaks on a day when the
+   * aspen is already half bare and the oak is still green — and the picture
+   * wants all three trees in colour at once. Scoring the GEOMETRIC mean over
+   * the three species instead of the sum makes any one of them being green or
+   * bare veto the day, which is exactly the compromise the eye wants. The date
+   * is still the model's: move the temperature slider and this moves with it.
+   */
+  function peakDay() {
+    var probe = M.createSim({ cols: 12, rows: 6, controls: sc.controls, seed: sc.seed });
+    var keys = ['bigtoothMaple', 'gambelOak', 'aspen'];
+    var best = 0, bestScore = -1;
+    for (var d = 0; d < M.SEASON_DAYS; d++) {
+      probe.step();
+      var prod = 1;
+      for (var k = 0; k < keys.length; k++) {
+        var s = probe.stats(keys[k]);
+        var colour = s.carotenoid + s.anthocyanin * 1.25;       // what shows
+        var held = 1 - s.fallenFrac;                            // still there
+        var green = 1 - s.chlorophyll;                          // no longer green
+        // The product reads literally: coloured, no longer green, and still
+        // attached. That lands on Oct 8 for an average season — bigtooth maple
+        // at full red, the oak turning, and the aspen past its best but not yet
+        // stripped. Weighting `held` any more softly pushes it a week later,
+        // into a duller valley; any harder pushes it back before the maple has
+        // started. This is the honest middle, and it moves with the sliders.
+        prod *= Math.max(1e-4, colour * green * held);
+      }
+      var score = Math.pow(prod, 1 / 3);
+      if (score > bestScore) { bestScore = score; best = d; }
+    }
+    return best;
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
