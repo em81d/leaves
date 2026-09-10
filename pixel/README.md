@@ -1,8 +1,15 @@
 # Phase 8 — Pixel-level leaves from an interpolated image grid
 
-**Status: Step 0 built, no cells generated yet.** `grid-viewer.html` is the acceptance test;
-`grid.js` holds the axes and target colours it shares with `tools/cells.js`. Nothing has been
-generated, which is what the viewer should be showing.
+**Status: Steps 0–2 built for bigtooth maple. Oak and aspen have no cells yet.**
+All 43 maple cells are generated and in `cells/bigtoothMaple/`; they register well enough
+to blend (worst IoU 0.945) and leaf space is defined and checked. Step 3, the
+interpolation itself, is the next thing and has not been started.
+
+`grid.js` holds the axes and target colours, shared with `tools/cells.js` so the
+generation targets and the acceptance test cannot drift apart. `grid-viewer.html` is the
+per-cell acceptance test (needs a server); `contact-sheet.html` is a static grid of the
+maple cells with measurements baked in (does not). `node pixel/tools/leafspace-build.js`
+is the registration gate.
 
 ## The idea in one paragraph
 
@@ -227,22 +234,122 @@ reachability. The viewer exposes it (default: skip below 0.10% of total blend we
 maple 42, oak 26, aspen 15 — 83 images, near the 85 estimated below. The "maple 41" figure
 does not reproduce as a hard count; 43 is the number with only the shared column removed.
 
-### Step 1 — generate and register
+### Step 1 — generate and register — **maple done, oak and aspen not started**
 
-Generate cells against the target colours above. For each, run the registration check:
-alpha mask vs. the reference cell, reject past threshold. Store as PNG with alpha, one
-directory per species, named `x{col}_y{row}.png`.
+Generate cells against the target colours above. Store as PNG with alpha, one directory
+per species, named `x{col}_y{row}.png`.
+
+All 43 maple cells exist in `cells/bigtoothMaple/`. Their colours were judged by eye
+against the targets and accepted; the measured ΔE per cell is baked into
+`contact-sheet.html`, which lays the grid out with each target beside what the image
+actually averages to and needs no server to open. Colour accuracy is not uniform — the
+brown end (`x7`) runs 15–26 ΔE dark, and the shared green `x0_y0` reads grey against its
+target — but the palette reads correctly to a human, which is the test that matters here,
+and the model is deliberately not being retuned to chase it.
+
+**The registration check moved to Step 2**, where it runs over the whole grid at once
+against a consensus silhouette rather than pairwise against a nominated reference cell.
+That is a better test — it has no privileged cell to be wrong about — and it needed leaf
+space to exist first, since cells arrive at different resolutions and cannot be compared
+until they are in a common frame.
 
 Generate flat and shadowless — **albedo only, no baked highlight, no cast shadow, no
 specular**. The renderer does its own lighting, haze and shadow. A baked highlight will
 fight it the moment a leaf rotates. This matters more than it sounds like it does.
 
-### Step 2 — leaf space
+### Step 2 — leaf space — **built**
 
-Every cell is the same shape, so a normalised coordinate `(u,v)` ∈ [0,1]² across the
-bounding box means the same anatomical point in every cell. That is the whole basis of the
-per-pixel blend. Confirm it holds before building on it — the registration check in Step 1
-is what earns the right to assume it.
+`leafspace.js` defines the space; `tools/leafspace-build.js` proves the maple grid sits in
+it and emits the one artefact Step 3 needs. Run `node pixel/tools/leafspace-build.js` to
+check, `--write` to regenerate. It exits non-zero on failure, so it works as a gate.
+
+```
+leaf space = the cell's alpha bounding box, resampled to 1024 × 1024.
+```
+
+Three decisions are folded into that sentence:
+
+- **The bounding box, not the image frame.** The maple cells arrived in 12 distinct frame
+  sizes from 572×546 to 1024×976 — whatever the generator happened to emit. The alpha
+  bbox is the leaf; the frame is noise. Each leaf fills 94–100% of its own frame, so
+  there was little padding to discard, but the *scales* differed almost 2×.
+- **Squashed to a square, not letterboxed.** Cell aspect ratios span 1.046–1.075.
+  Normalising that away is part of what makes `(u,v)` line up. The true proportion is not
+  lost — it is recorded as `aspect` (1.0539 for maple) and Step 4 restores it in the
+  destination rectangle it already computes.
+- **One alpha for the whole grid, not one per cell.** See below.
+
+### What the registration check measured
+
+Against the shared silhouette, over all 43 maple cells:
+
+| | |
+|---|---|
+| IoU, worst cell | **0.945** (`x4_y5`) |
+| IoU, mean | **0.968** |
+| colour gap, worst cell | 4.4% of the silhouette |
+| aspect spread | 1.046–1.075 |
+
+`MIN_IOU` is set to 0.93 — about a point below the worst current cell. Loose enough that
+ordinary generator noise does not trip it, tight enough to catch a regenerated cell that
+has actually moved a lobe.
+
+**The cells register at vein level, not just at the outline.** This was worth confirming
+separately, since IoU only sees the silhouette and it is the veins that would ghost. An
+edge-energy test over 50/50 blends is *not* a usable metric here — calibration showed a
+cell blended against a copy of itself shifted 0.4% of its width already scores 0.78, so
+the measure saturates at any sub-pixel offset and cannot tell "slightly soft" from
+"broken". Rendering the blends settles it: the worst-scoring quad walks green → yellow →
+orange with the midrib and every lateral vein holding sharp. The cells are one
+illustration recoloured, which is the property the whole technique depends on.
+
+### Why the grid shares a single alpha
+
+Every cell is meant to be the same leaf, so per-cell silhouette differences are generator
+noise, not signal. Blended, they are worse than noise: where one cell is opaque and its
+neighbour transparent, the blend composites leaf against nothing and leaves a **grey
+fringe along the lobe tips**. It is clearly visible at 1024 and invisible at the ~64px a
+leaf actually draws at, which is exactly the kind of artefact that survives into a later
+phase because nothing ever forces you to look at it.
+
+So the alpha is computed once for the species — the per-pixel mean over all cells,
+written to `_alpha.png` — and every cell contributes colour only. The fringe cannot occur,
+and Step 3 blends three channels instead of four.
+
+Two consequences that are not optional:
+
+- **Colour has to exist outside each cell's own mask.** Where the shared alpha says leaf
+  but this cell was transparent (up to 4.4% of the silhouette, worst case), the cell has
+  no colour to give. `fillOutward` extends the nearest opaque colour into that band by
+  two chamfer passes — O(pixels), where a dilation loop wide enough to close the gap
+  would not be.
+- **The mean alpha is too soft and has to be pulled back.** Averaging 43 silhouettes that
+  disagree by a pixel or two ramps the edge across the whole disagreement band: measured
+  22.7px against a single cell's 12.8px. `ALPHA_GAIN = 1.4`, applied around 0.5 so the
+  silhouette does not move, restores it to 1.02× a real cell. Sharper than that is not
+  crisper, it is sharper than the source images are, and it aliases. The measured
+  gain/width curve is in `leafspace.js` beside the constant.
+
+### Artefacts
+
+Both are generated, both live in the species' cell directory, and **nothing notices if
+they go stale** — re-run the tool after changing, adding or regenerating any cell.
+
+| file | what it is |
+|---|---|
+| `_alpha.png` | the shared silhouette, 1024², the alpha Step 3 composites with |
+| `_leafspace.json` | aspect, per-cell IoU and colour gap, source and bbox sizes |
+
+`tools/png.js` is a minimal zero-dependency PNG reader/writer (8-bit RGBA,
+non-interlaced) so the check runs in Node like the rest of the tooling. The repo has no
+`package.json` and this did not seem worth starting one over.
+
+### On the cell files
+
+They were renamed into the layout `grid-viewer.html` and `grid.js` already expected:
+`cells/bigtoothMaple/x{col}_y{row}.png`, 0-based, **row 0 is `y = 0`** (turned yellow) and
+the top row is the species' ceiling. Column 0 is the single shared green image `x0_y0.png`
+— `x0_y1` … `x0_y5` do not exist, because `y` is undefined on a fully green leaf.
 
 ### Step 3 — interpolation
 

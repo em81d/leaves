@@ -1,0 +1,139 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bigtooth maple — cell contact sheet</title>
+<style>
+  :root {
+    --bg: #16181a; --fg: #e8e6e1; --dim: #8b8d90; --line: #303336;
+    --cell: 150px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 28px 60px; background: var(--bg); color: var(--fg);
+         font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 20px; max-width: 74ch; }
+  .sub code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+
+  .bar { display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+         padding: 10px 0 18px; border-bottom: 1px solid var(--line); margin-bottom: 20px; }
+  label { display: flex; gap: 7px; align-items: center; color: var(--dim); cursor: pointer;
+          user-select: none; white-space: nowrap; }
+  input[type=range] { width: 130px; }
+
+  .grid { display: grid; gap: 10px; width: max-content;
+          grid-template-columns: 52px repeat(8, var(--cell)); }
+
+  .hcol, .hrow { color: var(--dim); font-family: ui-monospace, Consolas, monospace;
+                 font-size: 11px; display: flex; align-items: center; }
+  .hcol { justify-content: center; padding-bottom: 2px; }
+  .hcol b { color: var(--fg); font-weight: 600; }
+  .hrow { justify-content: flex-end; padding-right: 4px; }
+
+  figure { margin: 0; }
+  .img { position: relative; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 3px;
+         overflow: hidden; display: grid; place-items: center; }
+  .img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+  /* backdrops */
+  body.bd-checker .img { background:
+      conic-gradient(#2a2d30 0 25%, #202325 0 50%, #2a2d30 0 75%, #202325 0) 0 0/16px 16px; }
+  body.bd-dark  .img { background: #101112; }
+  body.bd-light .img { background: #f2f0ec; }
+  body.bd-target .img { background: var(--target); }
+
+  /* the target colour, painted as a frame behind the leaf */
+  .swatch { position: absolute; inset: 0; background: var(--target); pointer-events: none;
+            opacity: 0; transition: opacity .12s; }
+  body.show-swatch .swatch { opacity: 1; }
+  body.show-swatch .img img { position: relative; }
+
+  figcaption { display: flex; align-items: center; gap: 6px; padding: 5px 2px 0;
+               font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--dim); }
+  .chip { width: 11px; height: 11px; border-radius: 2px; flex: none; box-shadow: 0 0 0 1px #0006 inset; }
+  .de { margin-left: auto; font-weight: 600; }
+  .de.ok   { color: #6bbf73; }
+  .de.warn { color: #d4a24a; }
+  .de.bad  { color: #d96b5e; }
+  .shared .img { opacity: .55; }
+  .shared figcaption::after { content: 'shared'; margin-left: auto; font-style: italic; }
+  .shared .de { display: none; }
+
+  body.hide-de figcaption { display: none; }
+
+  .legend { margin-top: 26px; color: var(--dim); max-width: 74ch; }
+  .legend b { color: var(--fg); font-weight: 600; }
+</style>
+
+<h1>Bigtooth maple — cell contact sheet, 8 &times; 6</h1>
+<p class="sub">
+  Rows top&nbsp;&rarr;&nbsp;bottom are <code>y</code> 0.82&nbsp;&rarr;&nbsp;0 (red share &rarr; yellow);
+  columns left&nbsp;&rarr;&nbsp;right are <code>x</code> 0&nbsp;&rarr;&nbsp;1 (full green &rarr; dead brown).
+  Column&nbsp;0 is one shared image, because <code>y</code> is undefined on a fully green leaf.
+  &Delta;E is the alpha-weighted mean colour of each image, averaged in linear light, against the
+  target from <code>grid.js</code>.
+</p>
+
+<div class="bar">
+  <label><input type="checkbox" id="swatch"> Target colour behind leaf</label>
+  <label><input type="checkbox" id="nums" checked> Show &Delta;E</label>
+  <label>Backdrop
+    <select id="bd">
+      <option value="checker">checker</option>
+      <option value="dark">dark</option>
+      <option value="light">light</option>
+      <option value="target">target colour</option>
+    </select>
+  </label>
+  <label>Size <input type="range" id="size" min="80" max="320" value="150"></label>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<p class="legend">
+  <b>Reading it:</b> the two things to check by eye are that each row stays the same
+  <i>hue direction</i> across x, and that each column shades smoothly top to bottom —
+  a cell that jumps is the one that will ghost when Step&nbsp;3 blends it with its neighbours.
+  &Delta;E under 2 is invisible side by side, over 5 is clearly off.
+</p>
+
+<script>
+const CELLS = [{"file":"cells/bigtoothMaple/x0_y0.png","col":0,"row":5,"x":0,"y":0.82,"target":"#407b2d","measured":"#4e814c","dE":14.2,"coverage":0.473},{"file":"cells/bigtoothMaple/x1_y5.png","col":1,"row":5,"x":0.1429,"y":0.82,"target":"#7b612b","measured":"#777836","dE":15.6,"coverage":0.484},{"file":"cells/bigtoothMaple/x2_y5.png","col":2,"row":5,"x":0.2857,"y":0.82,"target":"#9c542a","measured":"#a97828","dE":21.7,"coverage":0.494},{"file":"cells/bigtoothMaple/x3_y5.png","col":3,"row":5,"x":0.4286,"y":0.82,"target":"#b3552a","measured":"#9f5927","dE":11.0,"coverage":0.489},{"file":"cells/bigtoothMaple/x4_y5.png","col":4,"row":5,"x":0.5714,"y":0.82,"target":"#b8552b","measured":"#9b4029","dE":13.2,"coverage":0.484},{"file":"cells/bigtoothMaple/x5_y5.png","col":5,"row":5,"x":0.7143,"y":0.82,"target":"#aa542c","measured":"#862d28","dE":20.9,"coverage":0.494},{"file":"cells/bigtoothMaple/x6_y5.png","col":6,"row":5,"x":0.8571,"y":0.82,"target":"#a1532c","measured":"#6f3325","dE":21.8,"coverage":0.497},{"file":"cells/bigtoothMaple/x7_y5.png","col":7,"row":5,"x":1,"y":0.82,"target":"#9a522d","measured":"#593822","dE":26.3,"coverage":0.499},{"file":"cells/bigtoothMaple/x0_y0.png","col":0,"row":4,"x":0,"y":0.656,"target":"#407b2d","measured":"#4e814c","dE":14.2,"coverage":0.473},{"file":"cells/bigtoothMaple/x1_y4.png","col":1,"row":4,"x":0.1429,"y":0.656,"target":"#6b712c","measured":"#767c38","dE":4.4,"coverage":0.481},{"file":"cells/bigtoothMaple/x2_y4.png","col":2,"row":4,"x":0.2857,"y":0.656,"target":"#92682c","measured":"#ab7c27","dE":14.0,"coverage":0.488},{"file":"cells/bigtoothMaple/x3_y4.png","col":3,"row":4,"x":0.4286,"y":0.656,"target":"#b4612b","measured":"#ae6729","dE":6.1,"coverage":0.481},{"file":"cells/bigtoothMaple/x4_y4.png","col":4,"row":4,"x":0.5714,"y":0.656,"target":"#b95b2c","measured":"#b65930","dE":3.2,"coverage":0.474},{"file":"cells/bigtoothMaple/x5_y4.png","col":5,"row":4,"x":0.7143,"y":0.656,"target":"#a9582c","measured":"#994e2b","dE":7.0,"coverage":0.481},{"file":"cells/bigtoothMaple/x6_y4.png","col":6,"row":4,"x":0.8571,"y":0.656,"target":"#9f572d","measured":"#7d4527","dE":13.5,"coverage":0.489},{"file":"cells/bigtoothMaple/x7_y4.png","col":7,"row":4,"x":1,"y":0.656,"target":"#98552d","measured":"#653e25","dE":20.6,"coverage":0.496},{"file":"cells/bigtoothMaple/x0_y0.png","col":0,"row":3,"x":0,"y":0.492,"target":"#407b2d","measured":"#4e814c","dE":14.2,"coverage":0.473},{"file":"cells/bigtoothMaple/x1_y3.png","col":1,"row":3,"x":0.1429,"y":0.492,"target":"#637a2d","measured":"#757f3a","dE":7.5,"coverage":0.478},{"file":"cells/bigtoothMaple/x2_y3.png","col":2,"row":3,"x":0.2857,"y":0.492,"target":"#8a782d","measured":"#b1842a","dE":16.5,"coverage":0.482},{"file":"cells/bigtoothMaple/x3_y3.png","col":3,"row":3,"x":0.4286,"y":0.492,"target":"#b5762e","measured":"#b87427","dE":3.7,"coverage":0.483},{"file":"cells/bigtoothMaple/x4_y3.png","col":4,"row":3,"x":0.5714,"y":0.492,"target":"#bc6e2e","measured":"#c46728","dE":7.4,"coverage":0.484},{"file":"cells/bigtoothMaple/x5_y3.png","col":5,"row":3,"x":0.7143,"y":0.492,"target":"#a7662f","measured":"#b45b25","dE":12.0,"coverage":0.486},{"file":"cells/bigtoothMaple/x6_y3.png","col":6,"row":3,"x":0.8571,"y":0.492,"target":"#9b612f","measured":"#915b33","dE":6.3,"coverage":0.488},{"file":"cells/bigtoothMaple/x7_y3.png","col":7,"row":3,"x":1,"y":0.492,"target":"#945e2f","measured":"#72462a","dE":15.3,"coverage":0.493},{"file":"cells/bigtoothMaple/x0_y0.png","col":0,"row":2,"x":0,"y":0.328,"target":"#407b2d","measured":"#4e814c","dE":14.2,"coverage":0.473},{"file":"cells/bigtoothMaple/x1_y2.png","col":1,"row":2,"x":0.1429,"y":0.328,"target":"#5e7f2e","measured":"#75843c","dE":9.4,"coverage":0.476},{"file":"cells/bigtoothMaple/x2_y2.png","col":2,"row":2,"x":0.2857,"y":0.328,"target":"#84832f","measured":"#a38930","dE":12.9,"coverage":0.479},{"file":"cells/bigtoothMaple/x3_y2.png","col":3,"row":2,"x":0.4286,"y":0.328,"target":"#b68a30","measured":"#ba8129","dE":6.8,"coverage":0.486},{"file":"cells/bigtoothMaple/x4_y2.png","col":4,"row":2,"x":0.5714,"y":0.328,"target":"#be7f30","measured":"#d87e28","dE":13.8,"coverage":0.493},{"file":"cells/bigtoothMaple/x5_y2.png","col":5,"row":2,"x":0.7143,"y":0.328,"target":"#a67030","measured":"#b86826","dE":13.2,"coverage":0.488},{"file":"cells/bigtoothMaple/x6_y2.png","col":6,"row":2,"x":0.8571,"y":0.328,"target":"#996830","measured":"#976032","dE":5.7,"coverage":0.49},{"file":"cells/bigtoothMaple/x7_y2.png","col":7,"row":2,"x":1,"y":0.328,"target":"#906330","measured":"#815031","dE":12.1,"coverage":0.49},{"file":"cells/bigtoothMaple/x0_y0.png","col":0,"row":1,"x":0,"y":0.164,"target":"#407b2d","measured":"#4e814c","dE":14.2,"coverage":0.473},{"file":"cells/bigtoothMaple/x1_y1.png","col":1,"row":1,"x":0.1429,"y":0.164,"target":"#5a822e","measured":"#708841","dE":9.9,"coverage":0.474},{"file":"cells/bigtoothMaple/x2_y1.png","col":2,"row":1,"x":0.2857,"y":0.164,"target":"#7f8c2f","measured":"#979038","dE":9.7,"coverage":0.476},{"file":"cells/bigtoothMaple/x3_y1.png","col":3,"row":1,"x":0.4286,"y":0.164,"target":"#b79b32","measured":"#b58e2d","dE":7.2,"coverage":0.485},{"file":"cells/bigtoothMaple/x4_y1.png","col":4,"row":1,"x":0.5714,"y":0.164,"target":"#c18f32","measured":"#da9029","dE":12.8,"coverage":0.493},{"file":"cells/bigtoothMaple/x5_y1.png","col":5,"row":1,"x":0.7143,"y":0.164,"target":"#a47832","measured":"#bc7829","dE":13.2,"coverage":0.491},{"file":"cells/bigtoothMaple/x6_y1.png","col":6,"row":1,"x":0.8571,"y":0.164,"target":"#966e31","measured":"#9f6632","dE":8.8,"coverage":0.492},{"file":"cells/bigtoothMaple/x7_y1.png","col":7,"row":1,"x":1,"y":0.164,"target":"#8e6731","measured":"#7d4a28","dE":14.8,"coverage":0.492},{"file":"cells/bigtoothMaple/x0_y0.png","col":0,"row":0,"x":0,"y":0,"target":"#407b2d","measured":"#4e814c","dE":14.2,"coverage":0.473},{"file":"cells/bigtoothMaple/x1_y0.png","col":1,"row":0,"x":0.1429,"y":0,"target":"#58852e","measured":"#6c8c46","dE":10.7,"coverage":0.473},{"file":"cells/bigtoothMaple/x2_y0.png","col":2,"row":0,"x":0.2857,"y":0,"target":"#7c9330","measured":"#8f9943","dE":8.6,"coverage":0.473},{"file":"cells/bigtoothMaple/x3_y0.png","col":3,"row":0,"x":0.4286,"y":0,"target":"#b8ab33","measured":"#b19c32","dE":8.1,"coverage":0.483},{"file":"cells/bigtoothMaple/x4_y0.png","col":4,"row":0,"x":0.5714,"y":0,"target":"#c39d34","measured":"#dda52a","dE":12.1,"coverage":0.494},{"file":"cells/bigtoothMaple/x5_y0.png","col":5,"row":0,"x":0.7143,"y":0,"target":"#a37f33","measured":"#c1892e","dE":13.3,"coverage":0.493},{"file":"cells/bigtoothMaple/x6_y0.png","col":6,"row":0,"x":0.8571,"y":0,"target":"#957232","measured":"#a76e34","dE":10.6,"coverage":0.493},{"file":"cells/bigtoothMaple/x7_y0.png","col":7,"row":0,"x":1,"y":0,"target":"#8c6a32","measured":"#7b4822","dE":16.5,"coverage":0.494}];
+const grid = document.getElementById('grid');
+const XS = [...new Set(CELLS.map(c => c.x))].sort((a,b)=>a-b);
+const YS = [...new Set(CELLS.map(c => c.y))].sort((a,b)=>b-a);
+
+grid.append(el('div',''));
+for (const x of XS) grid.append(el('div', `x <b>${x.toFixed(2)}</b>`, 'hcol'));
+
+for (const y of YS) {
+  grid.append(el('div', `y ${y.toFixed(2)}`, 'hrow'));
+  for (const x of XS) {
+    const c = CELLS.find(c => c.x === x && c.y === y);
+    const fig = document.createElement('figure');
+    if (c.col === 0) fig.className = 'shared';
+    fig.style.setProperty('--target', c.target);
+    const band = c.dE < 3 ? 'ok' : c.dE < 6 ? 'warn' : 'bad';
+    fig.innerHTML =
+      `<div class="img"><div class="swatch"></div><img src="${c.file}" alt="${c.file}" loading="lazy"></div>` +
+      `<figcaption title="${c.file} — target ${c.target}, measured ${c.measured}">` +
+        `<span class="chip" style="background:${c.target}"></span>${c.target}` +
+        `<span class="chip" style="background:${c.measured}"></span>` +
+        `<span class="de ${band}">${c.dE.toFixed(1)}</span>` +
+      `</figcaption>`;
+    grid.append(fig);
+  }
+}
+
+function el(tag, html, cls) {
+  const n = document.createElement(tag);
+  n.innerHTML = html; if (cls) n.className = cls; return n;
+}
+
+const body = document.body;
+const setBd = v => { body.className = body.className.replace(/\bbd-\S+/g,'').trim() + ' bd-' + v; };
+setBd('checker');
+document.getElementById('bd').onchange = e => setBd(e.target.value);
+document.getElementById('swatch').onchange = e => body.classList.toggle('show-swatch', e.target.checked);
+document.getElementById('nums').onchange = e => body.classList.toggle('hide-de', !e.target.checked);
+document.getElementById('size').oninput = e =>
+  document.documentElement.style.setProperty('--cell', e.target.value + 'px');
+</script>
