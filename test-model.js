@@ -10,7 +10,7 @@
  * leaf-phenology-data.md §3.7 and §5.
  * ==========================================================================*/
 
-var M = require('../model.js');
+var M = require('./model.js');
 
 var pass = 0, fail = 0;
 function check(label, ok, detail) {
