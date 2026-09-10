@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+
+
+
 """
 interpolate_images.py
 
@@ -25,6 +29,9 @@ Example:
     python interpolate_images.py start.png end.png 5
     -> creates 5 images: frame_1.png ... frame_5.png, evenly spaced between
        start.png (exclusive) and end.png (exclusive).
+
+This file was used in the generation of some of the initial images in /pixel/cells but is NOT the program or
+method used realtime in the leaf visualization itself. That one uses different color techniques.
 """
 
 import argparse
