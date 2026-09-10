@@ -1,15 +1,26 @@
 # Phase 8 — Pixel-level leaves from an interpolated image grid
 
-**Status: Steps 0–2 built for bigtooth maple. Oak and aspen have no cells yet.**
+**Status: Steps 0–4 built for bigtooth maple. Oak and aspen have no cells yet.**
 All 43 maple cells are generated and in `cells/bigtoothMaple/`; they register well enough
-to blend (worst IoU 0.945) and leaf space is defined and checked. Step 3, the
-interpolation itself, is the next thing and has not been started.
+to blend (worst IoU 0.945), leaf space is defined and checked, and `leaf-season.html`
+runs a season of four model leaves drawn entirely from the grid. Step 5 — per-leaf tint
+and multiple specimens per cell — has not been started, and the technique has been
+proven only at a handful of leaves, which was the scope.
 
-`grid.js` holds the axes and target colours, shared with `tools/cells.js` so the
-generation targets and the acceptance test cannot drift apart. `grid-viewer.html` is the
-per-cell acceptance test (needs a server); `contact-sheet.html` is a static grid of the
-maple cells with measurements baked in (does not). `node pixel/tools/leafspace-build.js`
-is the registration gate.
+| file | what it is |
+|---|---|
+| `grid.js` | the axes and target colours, shared with `tools/cells.js` so targets and test cannot drift |
+| `leafspace.js` | Step 2 — the common space every cell is put into |
+| `interpolate.js` | Steps 3 and 4 — the per-pixel blend, its cache, and the draw |
+| `leaf-season.html` | **the visualization**: a season of four model leaves, drawn from the grid |
+| `grid-viewer.html` | per-cell acceptance test, cell by cell |
+| `contact-sheet.html` | static grid of the maple cells, measurements baked in — opens without a server |
+| `tools/leafspace-build.js` | the registration gate; `--write` emits `_alpha.png` |
+| `tools/cells.js` | regenerates the target-colour tables from the live model |
+| `tools/png.js` | zero-dependency PNG read/write, so the tooling needs no install |
+
+Everything except `contact-sheet.html` reads image pixels, so **serve the repo root** —
+`python -m http.server` — rather than opening the files directly.
 
 ## The idea in one paragraph
 
@@ -351,21 +362,84 @@ They were renamed into the layout `grid-viewer.html` and `grid.js` already expec
 the top row is the species' ceiling. Column 0 is the single shared green image `x0_y0.png`
 — `x0_y1` … `x0_y5` do not exist, because `y` is undefined on a fully green leaf.
 
-### Step 3 — interpolation
+### Step 3 — interpolation — **built**
 
-For a leaf at `(x, y)`, find the four surrounding cells and bilinearly blend per pixel.
-**Blend in linear-light RGB, not sRGB** — blending gamma-encoded values darkens midpoints
-and will make the yellow→red transition muddy, which is precisely the transition the whole
-project is about. Alpha blends separately.
+`interpolate.js`. For a leaf at `(x, y)`, find the four surrounding cells and bilinearly
+blend per pixel, in linear light.
 
-Cache the composited result keyed on quantised `(x, y)`; do not recompute per leaf per
-frame even at this small scale, because the caching pattern is what makes the tree step
-possible later.
+```js
+LeafInterp.load({ species: 'bigtoothMaple' }).then(function (gi) {
+  var canvas = gi.forLeaf(leaf);     // a model leaf, straight in
+});
+```
 
-### Step 4 — draw
+- **Linear light, via lookup tables.** sRGB in, linear to blend, sRGB out. Blending
+  gamma-encoded values darkens midpoints and would make yellow→red muddy, which is
+  precisely the transition the project is about. `Math.pow` per channel per pixel is not
+  affordable, so the forward direction is a 256-entry table indexed by byte and the
+  inverse is quantised to 4096 steps — finer than 8-bit output can express, so it costs
+  nothing.
+- **Alpha is not blended.** Step 2 settled that: the grid shares one silhouette, so
+  `_alpha.png` is composited in whole and only three channels are interpolated.
+- **Cached on quantised `(x, y)`,** six sub-steps per cell interval, 48 composites held,
+  least-recently-used evicted. A four-leaf season runs at roughly 24 hits per 4 misses.
 
-Replace the `Path2D` fill with a `drawImage` of the composited cell under the transform
-that is already being built. At a few stationary leaves this is free.
+**Compositing resolution is not leaf-space resolution.** Leaf space stays 1024 and remains
+the source of truth; blending at 1024 is 3.1M pixel-blends per cache miss and stalls a
+frame for no visible gain. `WORK_PX = 512` measures **6.0 ms** per miss and ~34 MB for the
+43 cells. 384 was the first choice and was wrong for a reason worth recording: it looks
+identical on a 1× display and visibly soft on a 2× one, where a 300px leaf is 600 device
+pixels and the composite was being upscaled.
+
+### Step 4 — draw — **built**
+
+`interp.draw(ctx, canvas, cx, cy, w, rot)` — a `drawImage` under the transform, replacing
+the `Path2D` fill. At a few stationary leaves it is free.
+
+The one thing it must not forget: **leaf space is square and the leaf is not.** Step 2
+squashed the bounding box to a square to make `(u,v)` line up and recorded the true
+proportion as `aspect` (1.0539). Step 4 is where that comes back — the destination height
+is `w / aspect`. Drawing the composite square would stretch every leaf by 5%.
+
+### Seeing it — `leaf-season.html`
+
+Four bigtooth maples from `M.createSim()` in a 2 × 2, stepped a simulated day at a time,
+each drawn by blending the four cells around wherever the model has put it. **Serve the repo root and
+open `/pixel/leaf-season.html`** — like the other viewers it reads image pixels, which
+browsers refuse over `file://`.
+
+The weather controls, transport and HUD are lifted from `../old attempts/scene.html`
+unchanged, because they are the same controls driving the same model.
+
+- A **grid map** shows where the four leaves currently sit, over the cells at their target
+  colours, with a ring around the quad being blended. The mapping from model state to
+  image is the thing being demonstrated, so it is on screen rather than implied.
+- Each leaf carries its `(x, y)` and its four pigment bars — the numbers the axes are
+  computed from.
+- **The `Flat` button** (or <kbd>F</kbd>) draws `M.leafColor()` through the same
+  silhouette instead. Flipping between them is the argument for this whole phase reduced
+  to one keystroke: same shape, same model, colour only. It should be possible to lose
+  that comparison, and if a future grid does lose it, this is where it will show.
+- `?day=62&flat=1&seed=9&temp=-2&controls=1` — a particular day of a particular season is
+  reproducible from a URL, for a screenshot or to compare two settings side by side.
+
+### One correction to Step 2, found by building on it
+
+Step 2 defined `fillOutward` as repairing colour where the shared alpha calls a pixel leaf
+and the cell was transparent. That was not enough, and the shortfall was invisible until
+leaves were drawn against a dark background: **a pale halo around every leaf.**
+
+The cells carry a light fringe in their antialiased edge — measured mean brightness 152
+against 127 in the blade — and canvas returns unpremultiplied colour there, which
+amplifies error as alpha falls. `fillOutward` was only replacing colour below
+`ALPHA_CUT = 128`, so the 128–249 ramp kept that fringe, and the shared alpha then
+composited it at nearly full strength.
+
+The fix is that **"is this leaf?" and "is this pixel's colour trustworthy?" are different
+questions with different thresholds.** `COLOUR_TRUST = 250`: colour is carried outward
+from fully opaque pixels only, across the whole ramp rather than just outside the mask.
+This is a hazard specific to sharing one alpha across cells — with per-cell alpha the
+fringe is always drawn at the low alpha it came with, and stays harmless.
 
 ### Step 5 — keep the variation
 

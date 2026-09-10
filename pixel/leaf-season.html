@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel leaves — a season, drawn from the grid</title>
+<style>
+  /* Chrome lifted from ../old attempts/scene.html so the two read as one
+     project. The controls are the same controls, driving the same model. */
+  :root {
+    --ink: #f2ece2;
+    --dim: #b3a795;
+    --glass: rgba(20, 17, 14, 0.58);
+    --line: rgba(242, 236, 226, 0.14);
+    --accent: #e0a251;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #12151a; color: var(--ink);
+    font: 12.5px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .hud { position: fixed; z-index: 2; }
+  .card {
+    background: var(--glass); border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 13px; backdrop-filter: blur(9px); -webkit-backdrop-filter: blur(9px);
+    box-shadow: 0 6px 26px rgba(0,0,0,.30);
+  }
+  code { font-size: 11px; opacity: .9; }
+
+  #title { top: 16px; left: 16px; max-width: 320px; }
+  #title h1 { margin: 0 0 3px; font-size: 14px; font-weight: 650; letter-spacing: .2px; }
+  #title .who { color: var(--dim); font-size: 11px; margin: 0 0 10px; }
+  #date { display: flex; align-items: baseline; gap: 9px; margin-bottom: 9px; }
+  #date .d { font-size: 21px; font-weight: 650; letter-spacing: .3px; }
+  #date .n { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .env { display: grid; grid-template-columns: auto auto; gap: 3px 16px; font-size: 11.5px; }
+  .env span:nth-child(odd) { color: var(--dim); }
+  .env span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .05em;
+  }
+  .badge.frost  { background: #2b4b6b; color: #d5e9ff; }
+  .badge.freeze { background: #6b2b33; color: #ffdde1; }
+  .badge.none   { background: rgba(255,255,255,.07); color: var(--dim); }
+
+  #gridmap { top: 16px; right: 16px; width: 246px; }
+  .panel-h {
+    margin: 0 0 9px; font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--dim); font-weight: 650;
+  }
+  #mapc { display: block; width: 100%; height: auto; border-radius: 5px; }
+  .axl { display: flex; justify-content: space-between; color: var(--dim);
+         font-size: 10px; margin-top: 5px; }
+  .maplegend { color: var(--dim); font-size: 10.5px; margin-top: 7px; line-height: 1.45; }
+
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); }
+  #bar .card { display: flex; align-items: center; gap: 12px; padding: 9px 12px; }
+  button {
+    background: rgba(255,255,255,.07); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 11px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(255,255,255,.14); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 650; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 650; }
+  #prog { width: 200px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.13); overflow: hidden; }
+  #prog i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .spd { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11px; }
+  input[type=range] { accent-color: var(--accent); }
+  .spd input { width: 84px; }
+  .spd b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  #panel { top: 300px; right: 16px; width: 246px; display: none; }
+  #panel.open { display: block; }
+  .ctl { margin-bottom: 11px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 11.5px; }
+  .ctl label b { color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { width: 100%; margin: 0; }
+  .hr { height: 1px; background: var(--line); margin: 12px 0; }
+  .row { display: flex; gap: 6px; }
+  .row button { flex: 1; }
+  .chk { display: flex; align-items: center; gap: 7px; color: var(--dim); font-size: 11.5px; margin-top: 10px; }
+  .chk input { accent-color: var(--accent); }
+  .foot { color: var(--dim); font-size: 10.5px; margin: 11px 0 0; line-height: 1.5; }
+  .k { display: inline-block; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; font-size: 10px; }
+
+  #boot {
+    position: fixed; inset: 0; z-index: 9; display: grid; place-items: center;
+    background: #12151a; text-align: center; padding: 24px;
+  }
+  #boot .in { max-width: 460px; }
+  #boot h2 { font-size: 15px; font-weight: 650; margin: 0 0 8px; }
+  #boot p { color: var(--dim); margin: 0 0 14px; }
+  #bootbar { width: 260px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.13);
+             overflow: hidden; margin: 0 auto; }
+  #bootbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  #boot.err h2 { color: #e8907f; }
+  #boot code { background: rgba(255,255,255,.07); padding: 2px 6px; border-radius: 4px; }
+
+  @media (max-width: 900px) {
+    #gridmap { display: none; }
+    #panel { top: 16px; }
+    #prog { width: 90px; }
+    .spd { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="hud" id="title">
+  <div class="card">
+    <h1>Pixel leaves &mdash; one season</h1>
+    <p class="who">Four bigtooth maples stepped by <code>model.js</code>, each drawn by
+      blending the four grid cells around its <code>(x,&nbsp;y)</code></p>
+    <div id="date"><span class="d" id="oDate">Aug 1</span><span class="n" id="oDay">day 0 / 120</span></div>
+    <div class="env">
+      <span>Night low</span><span id="oTmin">&mdash;</span>
+      <span>Daylength</span><span id="oLen">&mdash;</span>
+      <span>Sunlight</span><span id="oSun">&mdash;</span>
+      <span>Gust</span><span id="oGust">&mdash;</span>
+      <span>Overnight</span><span id="oFrost">&mdash;</span>
+      <span>Precip</span><span id="oPrecip">&mdash;</span>
+      <span>Still held</span><span id="oHeld">&mdash;</span>
+    </div>
+  </div>
+</div>
+
+<div class="hud" id="gridmap">
+  <div class="card">
+    <div class="panel-h">Where they sit in the grid</div>
+    <canvas id="mapc" width="440" height="330"></canvas>
+    <div class="axl"><span>x 0 &mdash; full green</span><span>dead brown &mdash; 1</span></div>
+    <p class="maplegend">Cells are the generated images, at their measured colour.
+      Dots are the four leaves; the ring is the cell quad currently being blended.</p>
+  </div>
+</div>
+
+<div class="hud" id="panel">
+  <div class="card">
+    <div class="panel-h">Season environment</div>
+    <div class="ctl"><label for="temp"><span>Temperature</span><b id="tempV">0.0 &deg;C</b></label>
+      <input type="range" id="temp" min="-6" max="6" step="0.5" value="0"></div>
+    <div class="ctl"><label for="winterPrecip"><span>Winter precip (Jan&ndash;Mar)</span><b id="winterPrecipV">1.00 &times;</b></label>
+      <input type="range" id="winterPrecip" min="0.3" max="1.8" step="0.05" value="1"></div>
+    <div class="ctl"><label for="cloud"><span>Cloud cover</span><b id="cloudV">25 %</b></label>
+      <input type="range" id="cloud" min="0" max="100" step="1" value="25"></div>
+    <div class="ctl"><label for="wind"><span>Mean wind</span><b id="windV">3.0 m/s</b></label>
+      <input type="range" id="wind" min="0" max="12" step="0.25" value="3"></div>
+    <div class="ctl"><label for="precip"><span>In-season rain</span><b id="precipV">1.00 &times;</b></label>
+      <input type="range" id="precip" min="0" max="3" step="0.05" value="1"></div>
+    <div class="ctl"><label for="lat"><span>Latitude</span><b id="latV">40.6 &deg;N</b></label>
+      <input type="range" id="lat" min="30" max="46" step="0.5" value="40.65"></div>
+    <div class="hr"></div>
+    <div class="panel-h">Drawing</div>
+    <div class="row">
+      <button id="reseed">New leaves</button>
+      <button id="replay">Replay season</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="loopSeason" checked> Loop into a new season</label>
+    <label class="chk"><input type="checkbox" id="showFlat"> Draw flat <code>M.leafColor</code> instead</label>
+    <label class="chk"><input type="checkbox" id="showLabels" checked> Per-leaf readout</label>
+    <p class="foot" id="perf">&mdash;</p>
+    <p class="foot">Weather takes effect going forward &mdash; a leaf already brown does not go back.<br>
+      <span class="k">Space</span> play &nbsp; <span class="k">&rarr;</span> step a day &nbsp;
+      <span class="k">F</span> flat &nbsp; <span class="k">C</span> controls</p>
+  </div>
+</div>
+
+<div class="hud" id="bar">
+  <div class="card">
+    <button class="primary" id="play">Pause</button>
+    <button id="stepBtn">Step</button>
+    <div id="prog"><i id="progFill"></i></div>
+    <div class="spd"><span>speed</span><input type="range" id="speed" min="0.25" max="6" step="0.25" value="1.5"><b id="speedV">1.5&times;</b></div>
+    <button id="flatBtn">Flat</button>
+    <button id="cfg">Controls</button>
+  </div>
+</div>
+
+<div id="boot"><div class="in">
+  <h2 id="bootH">Loading 43 cells</h2>
+  <p id="bootP">Putting each into leaf space at 512&nbsp;px.</p>
+  <div id="bootbar"><i id="bootFill"></i></div>
+</div></div>
+
+<script src="../model.js"></script>
+<script src="grid.js"></script>
+<script src="leafspace.js"></script>
+<script src="interpolate.js"></script>
+<script>
+/* ============================================================================
+ * Steps 3 and 4 of pixel/README.md, made visible.
+ *
+ * Nothing biological is decided here. Four maple leaves come from
+ * M.createSim(), are advanced one simulated day at a time by the model, and
+ * each frame every leaf is asked one question — where are you in the grid? —
+ * via LeafGrid.axesOf(). The answer indexes the image. This file owns layout
+ * and the transport, and nothing else.
+ *
+ * The flat toggle draws M.leafColor() through the same silhouette, so flipping
+ * between them is a comparison of colour alone: it is the argument the phase
+ * exists to make, and it should be possible to lose it if the grid is bad.
+ * ==========================================================================*/
+'use strict';
+
+var M = window.LeafModel, G = window.LeafGrid;
+var SPECIES = 'bigtoothMaple';
+var GRID_COLS = 2, GRID_ROWS = 2;
+var N_LEAVES = GRID_COLS * GRID_ROWS;
+
+var el = function (id) { return document.getElementById(id); };
+var cv = el('c'), ctx = cv.getContext('2d');
+var interp = null, sim = null, dpr = 1;
+var playing = true, acc = 0, lastT = 0;
+
+/* ------------------------------------------------------------------ boot */
+LeafInterp.load({
+  species: SPECIES,
+  onProgress: function (done, total) {
+    el('bootFill').style.width = (100 * done / total).toFixed(0) + '%';
+    el('bootH').textContent = 'Loading cells — ' + done + ' / ' + total;
+  }
+}).then(function (gi) {
+  interp = gi;
+  el('boot').style.display = 'none';
+  start();
+}).catch(function (err) {
+  var b = el('boot');
+  b.className = 'err';
+  el('bootH').textContent = 'Could not load the grid';
+  el('bootP').innerHTML = String(err.message || err) +
+    '<br><br>Browsers refuse to read image pixels over <code>file://</code>. ' +
+    'Serve the repo root — <code>python -m http.server</code> — and open ' +
+    '<code>/pixel/leaf-season.html</code>.';
+  el('bootbar').style.display = 'none';
+});
+
+function start() {
+  resize();
+  window.addEventListener('resize', resize);
+  var q = applyQuery();
+  buildSim(q.seed == null ? 20260910 : q.seed);
+  labels();
+  /* ?day=62 runs the season forward without drawing, so a particular day of a
+     particular season is reproducible from a URL — for a screenshot, or to put
+     two settings side by side. */
+  if (q.day) { for (var d = 0; d < q.day && sim.step(); d++); refreshHud(); }
+  if (q.paused || q.day) setPlaying(false);
+  lastT = performance.now();
+  requestAnimationFrame(frame);
+}
+
+/* ?day=62&paused=1&flat=1&controls=1&temp=-2&cloud=70&seed=9 */
+function applyQuery() {
+  var out = {}, q = window.location.search;
+  if (!q || q.length < 2) return out;
+  var p = {};
+  q.slice(1).split('&').forEach(function (kv) {
+    var i = kv.indexOf('=');
+    p[decodeURIComponent(i < 0 ? kv : kv.slice(0, i))] = i < 0 ? '1' : decodeURIComponent(kv.slice(i + 1));
+  });
+  var sliders = { temp: 'temp', cloud: 'cloud', wind: 'wind', precip: 'precip',
+                  winterPrecip: 'winterPrecip', lat: 'lat', speed: 'speed' };
+  for (var k in sliders) if (p[k] != null) el(sliders[k]).value = p[k];
+  if (p.flat) { el('showFlat').checked = true; syncFlat(); }
+  if (p.nolabels) el('showLabels').checked = false;
+  if (p.controls) el('panel').classList.add('open');
+  if (p.day) out.day = Math.max(0, Math.min(M.SEASON_DAYS, parseInt(p.day, 10) || 0));
+  if (p.paused) out.paused = true;
+  if (p.seed != null) out.seed = (parseInt(p.seed, 10) || 0) >>> 0;
+  if (p.loop === '0') el('loopSeason').checked = false;
+  return out;
+}
+
+/* ------------------------------------------------------------------- sim */
+function buildSim(seed) {
+  sim = M.createSim({
+    cols: N_LEAVES, rows: 1, mix: [SPECIES], seed: seed,
+    controls: readControls()
+  });
+  sim.reset();
+  refreshHud();
+}
+
+function readControls() {
+  return {
+    tempOffset: parseFloat(el('temp').value),
+    cloudCover: parseFloat(el('cloud').value),
+    windMean: parseFloat(el('wind').value),
+    precipMult: parseFloat(el('precip').value),
+    winterPrecip: parseFloat(el('winterPrecip').value),
+    latitude: parseFloat(el('lat').value)
+  };
+}
+
+function pushControls() {
+  var c = readControls();
+  for (var k in c) sim.controls[k] = c[k];
+}
+
+/* ------------------------------------------------------------------ loop */
+function frame(t) {
+  var dt = Math.min(0.1, (t - lastT) / 1000);
+  lastT = t;
+
+  if (playing) {
+    acc += dt * parseFloat(el('speed').value) * 3.2;      // ~3 sim days a second at 1x
+    while (acc >= 1) {
+      acc -= 1;
+      if (!sim.step()) {
+        if (el('loopSeason').checked) { buildSim((sim.seed * 1664525 + 1013904223) >>> 0); }
+        else { playing = false; el('play').textContent = 'Play'; }
+        break;
+      }
+      refreshHud();
+    }
+  }
+
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* ------------------------------------------------------------ Step 4: draw */
+function draw() {
+  var W = cv.width / dpr, H = cv.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#171b21');
+  g.addColorStop(1, '#0e1114');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  var flat = el('showFlat').checked;
+  var labelsOn = el('showLabels').checked;
+
+  /* Lay the 2 x 2 out against the space the HUD actually leaves, not against
+     fractions of the window — a fixed fraction put the leaves under the title
+     card and under the transport bar at the same time on a short window.
+     Each leaf owns a slot; its readout and its fall both have to stay inside
+     that slot, or a leaf in the top row lands on the one below it. */
+  var padR = W > 980 ? 302 : 24;                        // clear the grid map
+
+  /* Beside the title card if two columns still fit there, below it if not.
+     Going below costs ~270px of height, which at this leaf count is the
+     difference between a 254px leaf and an 84px one. */
+  var besideCard = (W - 354 - padR) / GRID_COLS >= 150;
+  var padL = besideCard ? 354 : 24;
+  var topClear = besideCard ? 28 : 300;
+  var bottomClear = H - 104;                            // above the transport bar
+
+  var slotW = Math.max(120, W - padL - padR) / GRID_COLS;
+  var slotH = Math.max(150, bottomClear - topClear) / GRID_ROWS;
+
+  var READOUT = labelsOn ? 74 : 10;
+  var FALL_DROP = Math.min(70, slotH * 0.16);
+  var maxLeafH = Math.max(80, slotH - READOUT - FALL_DROP - 8);
+  var leafW = Math.min(slotW * 0.9, maxLeafH * interp.aspect);
+  var leafH = leafW / interp.aspect;
+
+  var t = performance.now() / 1000;
+
+  for (var i = 0; i < sim.leaves.length; i++) {
+    var leaf = sim.leaves[i];
+    var col = i % GRID_COLS, row = (i / GRID_COLS) | 0;
+    var cx = padL + slotW * (col + 0.5);
+    var cy = topClear + slotH * row + leafH / 2;
+    var ax = G.axesOf(leaf);
+
+    /* A fallen leaf sinks and tips over. The model decided it fell; this only
+     * decides where a fallen thing sits on the page. */
+    var fell = !leaf.attached;
+    var sinceFall = fell ? Math.min(1, (sim.doy - leaf.fellOnDoy) / 6) : 0;
+    var ease = sinceFall * sinceFall * (3 - 2 * sinceFall);
+    var y = cy + ease * FALL_DROP;
+    var rot = ease * 0.5 + (fell ? 0 : Math.sin(t * 0.6 + i) * 0.014);
+    var w = leafW * (1 - 0.12 * ease);
+
+    var img = flat ? interp.flat(M.leafColor(leaf)) : interp.forLeaf(leaf);
+
+    ctx.globalAlpha = fell ? 1 - 0.45 * ease : 1;
+    interp.draw(ctx, img, cx, y, w, rot);
+    ctx.globalAlpha = 1;
+
+    if (labelsOn) drawLabel(cx, y + (w / interp.aspect) / 2 + 20, leaf, ax, fell);
+  }
+
+  drawMap();
+  el('perf').textContent =
+    'composite ' + interp.stats.lastMs.toFixed(1) + ' ms · cache ' +
+    interp.cacheSize() + '/' + LeafInterp.CACHE_MAX + ' · ' +
+    interp.stats.hits + ' hit / ' + interp.stats.misses + ' miss · ' +
+    interp.px + 'px @ ' + G.COLS + '×' + G.rowsOf(SPECIES);
+}
+
+function drawLabel(cx, y, leaf, ax, fell) {
+  ctx.textAlign = 'center';
+  ctx.font = '600 11px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = fell ? 'rgba(179,167,149,.55)' : '#cfc6b8';
+  ctx.fillText('x ' + ax.x.toFixed(2) + '   y ' + (ax.yDefined ? ax.y.toFixed(2) : '—'), cx, y);
+
+  /* Pigment bars — the four numbers the axes are computed from, so the
+     mapping from model state to grid position stays legible. */
+  var bars = [
+    ['chl', leaf.chlorophyll, '#5f9e4a'],
+    ['car', leaf.carotenoid, '#d8b13a'],
+    ['ant', leaf.anthocyanin, '#b8474a'],
+    ['tan', leaf.tannin, '#8a6a45']
+  ];
+  var bw = 60, bh = 4, step = 11, x0 = cx - bw / 2 + 11;
+  ctx.font = '9.5px ui-monospace, Consolas, monospace';
+  ctx.textBaseline = 'middle';
+  for (var i = 0; i < bars.length; i++) {
+    var by = y + 13 + i * step;
+    ctx.fillStyle = 'rgba(179,167,149,.7)';
+    ctx.textAlign = 'right';
+    ctx.fillText(bars[i][0], x0 - 6, by + bh / 2);
+    ctx.fillStyle = 'rgba(255,255,255,.10)';
+    ctx.fillRect(x0, by, bw, bh);
+    ctx.fillStyle = bars[i][2];
+    ctx.fillRect(x0, by, bw * Math.max(0, Math.min(1, bars[i][1])), bh);
+  }
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'center';
+  if (fell) {
+    ctx.fillStyle = 'rgba(179,167,149,.55)';
+    ctx.font = 'italic 10px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillText('fell ' + M.doyToLabel(leaf.fellOnDoy), cx, y + 17 + bars.length * step);
+  }
+}
+
+/* ------------------------------------------------- the grid position map */
+var mapc = el('mapc'), mctx = mapc.getContext('2d');
+var MAP_CELLS = (function () {
+  var rows = G.rowsOf(SPECIES), out = [];
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < G.COLS; c++) {
+      out.push({ c: c, r: r, hex: G.cellColor(SPECIES, G.xAt(c), G.yAt(SPECIES, r)) });
+    }
+  }
+  return out;
+})();
+
+function drawMap() {
+  var W = mapc.width, H = mapc.height, rows = G.rowsOf(SPECIES), cols = G.COLS;
+  var cw = W / cols, ch = H / rows;
+  mctx.clearRect(0, 0, W, H);
+
+  for (var i = 0; i < MAP_CELLS.length; i++) {
+    var m = MAP_CELLS[i];
+    mctx.fillStyle = m.hex;
+    /* Row 0 is y = 0 and belongs at the BOTTOM — the same orientation the
+       README's tables and the contact sheet use. */
+    mctx.fillRect(m.c * cw, H - (m.r + 1) * ch, cw + 0.5, ch + 0.5);
+  }
+
+  mctx.strokeStyle = 'rgba(0,0,0,.22)';
+  mctx.lineWidth = 1;
+  for (var c = 1; c < cols; c++) {
+    mctx.beginPath(); mctx.moveTo(c * cw, 0); mctx.lineTo(c * cw, H); mctx.stroke();
+  }
+  for (var r = 1; r < rows; r++) {
+    mctx.beginPath(); mctx.moveTo(0, r * ch); mctx.lineTo(W, r * ch); mctx.stroke();
+  }
+
+  for (var k = 0; k < sim.leaves.length; k++) {
+    var leaf = sim.leaves[k];
+    var cc = interp.coordsOf(leaf);
+    var px = (cc.cx + 0.5) * cw;
+    var py = H - (cc.cy + 0.5) * ch;
+
+    /* The quad actually being blended, so the bilinear lookup is visible. */
+    var c0 = Math.max(0, Math.min(cols - 2, Math.floor(cc.cx)));
+    var r0 = Math.max(0, Math.min(rows - 2, Math.floor(cc.cy)));
+    mctx.strokeStyle = 'rgba(255,255,255,.30)';
+    mctx.lineWidth = 1.5;
+    mctx.strokeRect(c0 * cw + 0.75, H - (r0 + 2) * ch + 0.75, cw * 2 - 1.5, ch * 2 - 1.5);
+
+    mctx.beginPath();
+    mctx.arc(px, py, 6.5, 0, Math.PI * 2);
+    mctx.fillStyle = leaf.attached ? '#fff' : 'rgba(255,255,255,.35)';
+    mctx.fill();
+    mctx.lineWidth = 2;
+    mctx.strokeStyle = 'rgba(0,0,0,.55)';
+    mctx.stroke();
+  }
+}
+
+/* ------------------------------------------------------------------- hud */
+function refreshHud() {
+  var e = sim.env;
+  el('oDate').textContent = M.doyToLabel(sim.doy);
+  el('oDay').textContent = 'day ' + sim.day + ' / ' + M.SEASON_DAYS;
+  el('oTmin').textContent = e.tMin.toFixed(1) + ' °C';
+  el('oLen').textContent = e.dayLength.toFixed(2) + ' h';
+  el('oSun').textContent = e.swMeanWm2 + ' W/m²';
+  el('oGust').textContent = e.gust.toFixed(1) + ' m/s';
+  el('oFrost').innerHTML = e.hardFreeze
+    ? '<span class="badge freeze">HARD FREEZE</span>'
+    : e.lightFrost ? '<span class="badge frost">frost</span>'
+                   : '<span class="badge none">clear</span>';
+  el('oPrecip').textContent = e.rain < 0.05 ? 'none' : e.rain.toFixed(1) + ' mm';
+
+  var held = 0;
+  for (var i = 0; i < sim.leaves.length; i++) if (sim.leaves[i].attached) held++;
+  el('oHeld').textContent = held + ' of ' + sim.leaves.length;
+
+  el('progFill').style.width = (100 * sim.day / M.SEASON_DAYS).toFixed(1) + '%';
+}
+
+/* -------------------------------------------------------------- controls */
+var ctlIds = ['temp', 'winterPrecip', 'cloud', 'wind', 'precip', 'lat'];
+
+function labels() {
+  var tv = parseFloat(el('temp').value);
+  el('tempV').textContent = (tv >= 0 ? '+' : '') + tv.toFixed(1) + ' °C';
+  el('cloudV').textContent = el('cloud').value + ' %';
+  el('windV').textContent = parseFloat(el('wind').value).toFixed(1) + ' m/s';
+  el('precipV').textContent = parseFloat(el('precip').value).toFixed(2) + ' ×';
+  el('winterPrecipV').textContent = parseFloat(el('winterPrecip').value).toFixed(2) + ' ×';
+  el('latV').textContent = parseFloat(el('lat').value).toFixed(1) + ' °N';
+  el('speedV').textContent = parseFloat(el('speed').value).toFixed(2) + '×';
+}
+
+ctlIds.forEach(function (id) {
+  el(id).addEventListener('input', function () {
+    labels();
+    if (!sim) return;
+    pushControls();
+    /* Before the season opens, re-seed day 0 so daylength answers the new
+       latitude straight away rather than on the first step. */
+    if (sim.day === 0) {
+      sim.env = M.makeEnvironment(sim.doy, sim.controls, M.makeRng(sim.seed ^ 0xC2B2AE35));
+      refreshHud();
+    }
+  });
+});
+el('speed').addEventListener('input', labels);
+
+function setPlaying(v) { playing = v; el('play').textContent = v ? 'Pause' : 'Play'; }
+function stepOne() { if (sim.step()) refreshHud(); }
+
+function syncFlat() {
+  el('flatBtn').classList.toggle('on', el('showFlat').checked);
+}
+
+el('play').addEventListener('click', function () { setPlaying(!playing); });
+el('stepBtn').addEventListener('click', function () { setPlaying(false); stepOne(); });
+el('replay').addEventListener('click', function () { acc = 0; buildSim(sim.seed); setPlaying(true); });
+el('reseed').addEventListener('click', function () {
+  acc = 0;
+  buildSim((sim.seed * 1664525 + 1013904223) >>> 0);
+  setPlaying(true);
+});
+el('cfg').addEventListener('click', function () { el('panel').classList.toggle('open'); });
+el('flatBtn').addEventListener('click', function () {
+  el('showFlat').checked = !el('showFlat').checked;
+  syncFlat();
+});
+el('showFlat').addEventListener('change', syncFlat);
+
+document.addEventListener('keydown', function (ev) {
+  if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+  if (ev.code === 'Space') { ev.preventDefault(); setPlaying(!playing); }
+  else if (ev.code === 'ArrowRight') { ev.preventDefault(); setPlaying(false); stepOne(); }
+  else if (ev.code === 'KeyC') el('panel').classList.toggle('open');
+  else if (ev.code === 'KeyF') { el('showFlat').checked = !el('showFlat').checked; syncFlat(); }
+});
+
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(window.innerWidth * dpr);
+  cv.height = Math.round(window.innerHeight * dpr);
+}
+</script>
+</body>
+</html>

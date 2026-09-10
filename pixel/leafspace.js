@@ -50,6 +50,24 @@
    * leaf. 0.5 is a per-pixel majority vote. */
   var CONSENSUS = 0.5;
 
+  /* Alpha at or above which a pixel's COLOUR can be trusted — a much higher
+   * bar than ALPHA_CUT, and for a different question.
+   *
+   * ALPHA_CUT asks "is this leaf?", which a half-covered edge pixel honestly
+   * is. This asks "is this pixel's RGB the leaf's actual colour?", and on a
+   * partly transparent pixel it is not: these cells carry a pale fringe in
+   * their antialiased edge (measured mean brightness 152 against 127 in the
+   * blade), and canvas hands back unpremultiplied values there, which
+   * amplifies whatever error is present as alpha falls.
+   *
+   * That colour is harmless while it is drawn at the alpha it came with. It
+   * stops being harmless the moment the grid shares one silhouette, because
+   * the shared alpha can call a pixel opaque that this cell had half-covered
+   * — and then the fringe is composited at full strength. It reads as a pale
+   * halo around every leaf. So fillOutward replaces colour across the whole
+   * ramp, not just outside the mask. */
+  var COLOUR_TRUST = 250;
+
   /* Registration floor. A cell whose mask agrees with the consensus by less
    * IoU than this is rejected: it is no longer the same leaf, and blending it
    * would ghost. The maple grid measures 0.945-0.984, so this sits a little
@@ -205,16 +223,21 @@
     return finishConsensus(acc, cells.length);
   }
 
-  /* ---- colour outside a cell's own mask --------------------------------- */
-  /* Where the shared alpha says "leaf" but this cell was transparent, the
-   * cell has no colour to contribute. Extend the nearest opaque colour
-   * outward to cover it. Two chamfer passes carry the nearest opaque source
-   * across the image, which is O(pixels) — a dilation loop wide enough to
-   * close the gap is not, at this resolution.
+  /* ---- colour where the cell has none to give --------------------------- */
+  /* Two cases, one fix. The shared alpha can call a pixel leaf where this cell
+   * was transparent (up to 4.4% of the silhouette), and it can call a pixel
+   * opaque where this cell was only partly covered. In the first the cell has
+   * no colour at all; in the second it has colour that is not trustworthy —
+   * see COLOUR_TRUST. Both are repaired by carrying the nearest fully opaque
+   * colour outward across them.
+   *
+   * Two chamfer passes propagate the nearest opaque source, which is
+   * O(pixels). A dilation loop wide enough to close the gap would not be, at
+   * this resolution.
    *
    * Mutates img.data in place and returns the number of pixels filled. */
   function fillOutward(img, cut) {
-    cut = cut == null ? ALPHA_CUT : cut;
+    cut = cut == null ? COLOUR_TRUST : cut;
     var w = img.width, h = img.height, d = img.data, n = w * h;
     var srcX = new Int32Array(n), srcY = new Int32Array(n);
     var dist = new Float64Array(n);
@@ -308,6 +331,7 @@
     LEAF_PX: LEAF_PX,
     ALPHA_CUT: ALPHA_CUT,
     CONSENSUS: CONSENSUS,
+    COLOUR_TRUST: COLOUR_TRUST,
     MIN_IOU: MIN_IOU,
     alphaBounds: alphaBounds,
     resample: resample,
