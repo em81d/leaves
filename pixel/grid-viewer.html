@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leaf grid viewer — Phase 8 Step 0</title>
+<style>
+  :root {
+    --bg: #16191d;
+    --panel: #1e2228;
+    --panel-2: #262b32;
+    --line: #333941;
+    --text: #dfe3e8;
+    --dim: #8b939d;
+    --accent: #c8874a;
+    --ok: #6fbf73;
+    --warn: #d8a447;
+    --bad: #d1645d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 18px; }
+
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .2px; }
+  .sub { color: var(--dim); font-size: 11.5px; margin: 0 0 14px; max-width: 76ch; }
+  .sub code { color: #b9c2cc; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .panel + .panel { margin-top: 12px; }
+  .panel h2 {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--dim); margin: 0 0 11px; font-weight: 600;
+  }
+
+  /* --- toolbar --- */
+  .bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .fld { display: flex; flex-direction: column; gap: 5px; }
+  .fld > span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  select, input[type=text] {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: inherit;
+  }
+  input[type=text] { min-width: 210px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  input[type=number] {
+    width: 84px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: inherit;
+    font-variant-numeric: tabular-nums;
+  }
+  button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 7px 11px;
+    font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: #2f353d; }
+  label.chk { display: flex; align-items: center; gap: 6px; cursor: pointer; padding-bottom: 6px; }
+  label.chk input { accent-color: var(--accent); margin: 0; }
+
+  /* --- summary --- */
+  .sum { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 13px;
+         padding-top: 13px; border-top: 1px solid var(--line); }
+  .sum div { display: flex; gap: 7px; align-items: baseline; }
+  .sum .k { color: var(--dim); font-size: 11.5px; }
+  .sum b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* --- grid --- */
+  .grid {
+    display: grid;
+    grid-template-columns: 34px repeat(var(--cols), minmax(0, 1fr));
+    gap: 7px;
+  }
+  .ylab, .xlab {
+    color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ylab { flex-direction: column; gap: 2px; }
+  .ylab b { color: #b9c2cc; font-weight: 600; }
+  .xlab { padding-top: 4px; }
+
+  .cell { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+  .art {
+    position: relative; aspect-ratio: 1; border-radius: 5px; overflow: hidden;
+    border: 1px solid var(--line); display: flex;
+    /* checkerboard, so cell alpha is visible */
+    background-color: #21252b;
+    background-image:
+      linear-gradient(45deg, #2b3037 25%, transparent 25%, transparent 75%, #2b3037 75%),
+      linear-gradient(45deg, #2b3037 25%, transparent 25%, transparent 75%, #2b3037 75%);
+    background-size: 14px 14px;
+    background-position: 0 0, 7px 7px;
+  }
+  .cell:hover .art { border-color: #4c5561; }
+  .cell.sel .art { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+  /* the model's target colour, always beside the image */
+  .target { width: 22%; flex: none; box-shadow: 1px 0 0 rgba(0,0,0,.45); }
+  .shot { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; }
+  .shot img { max-width: 100%; max-height: 100%; display: block; image-rendering: auto; }
+
+  /* nothing generated yet: the target colour, flagged as a placeholder */
+  .empty { position: absolute; inset: 6px; border: 1px dashed rgba(255,255,255,.45);
+           border-radius: 3px; opacity: .5; }
+  .note {
+    position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
+    font-size: 9.5px; letter-spacing: .04em; text-transform: uppercase;
+    padding: 2px 3px; color: #e7ebef; background: rgba(12,14,17,.72);
+  }
+  /* "not generated" is the resting state of most of the grid — say it quietly */
+  .note.soft { background: none; color: var(--dim); }
+
+  /* never indexed by the model — do not generate these */
+  .cell.unreached .art { opacity: .34; }
+  .cell.unreached .art::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(45deg,
+      rgba(255,255,255,.14) 0 3px, transparent 3px 8px);
+  }
+  .cell.unreached .foot { opacity: .5; }
+
+  /* left column: y is undefined on a fully green leaf, one image serves all rows */
+  .cell.shared .art { opacity: .62; }
+
+  .dens { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--accent);
+          box-shadow: 0 0 0 1px rgba(12,14,17,.6); }
+
+  .foot { display: flex; align-items: baseline; gap: 8px;
+          font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  .nm { color: var(--dim); font-family: ui-monospace, Consolas, monospace; }
+  .de { font-weight: 700; }
+  .de.ok { color: var(--ok); } .de.warn { color: var(--warn); } .de.bad { color: var(--bad); }
+  .de.none { color: #575f69; font-weight: 400; }
+
+  .axis { color: var(--dim); font-size: 11px; margin: 12px 0 0; }
+
+  /* --- detail --- */
+  .det { display: grid; grid-template-columns: 190px 1fr; gap: 16px; }
+  @media (max-width: 700px) { .det { grid-template-columns: 1fr; } }
+  .det .big {
+    aspect-ratio: 1; border: 1px solid var(--line); border-radius: 6px; display: flex;
+    background-color: #21252b;
+    background-image:
+      linear-gradient(45deg, #2b3037 25%, transparent 25%, transparent 75%, #2b3037 75%),
+      linear-gradient(45deg, #2b3037 25%, transparent 25%, transparent 75%, #2b3037 75%);
+    background-size: 18px 18px; background-position: 0 0, 9px 9px; overflow: hidden;
+  }
+  .det .big .target { width: 26%; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; align-content: start; }
+  .kv .k { color: var(--dim); }
+  .kv .v { font-variant-numeric: tabular-nums; }
+  .kv .v code { font-family: ui-monospace, Consolas, monospace; }
+  .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+        border: 1px solid rgba(255,255,255,.25); vertical-align: -1px; margin-right: 5px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--dim); font-size: 11.5px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px;
+              border: 1px solid var(--line); vertical-align: -2px; margin-right: 6px; }
+  .legend i.hatch { background: repeating-linear-gradient(45deg,
+      rgba(255,255,255,.22) 0 3px, transparent 3px 8px); }
+  .legend i.dash { border-style: dashed; }
+  .legend i.acc { background: var(--accent); }
+
+  .msg { color: var(--dim); font-size: 11.5px; margin-top: 10px; }
+  .msg.err { color: var(--warn); }
+  .drop { outline: 2px dashed var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Leaf grid viewer <span style="color:var(--dim);font-weight:400">— Phase 8, Step 0</span></h1>
+  <p class="sub">
+    Lays out one species' cell grid with the model's target colour beside each cell and marks
+    the region no leaf ever indexes. Target colours and the <code>(x, y)</code> axes come from
+    <code>pixel/grid.js</code> against the live <code>model.js</code>, so this page and
+    <code>pixel/tools/cells.js</code> cannot disagree. Drop a PNG on a cell, or point it at a
+    folder, to check a generated image against its target before the set is committed.
+  </p>
+
+  <div class="panel">
+    <div class="bar">
+      <label class="fld"><span>Species</span>
+        <select id="species"></select>
+      </label>
+      <label class="fld"><span>Cell directory</span>
+        <input type="text" id="dir" spellcheck="false">
+      </label>
+      <button id="reload">Reload images</button>
+      <button id="pick">Load folder…</button>
+      <input type="file" id="picker" webkitdirectory directory multiple hidden>
+      <label class="fld"><span>Average in</span>
+        <select id="space">
+          <option value="linear">linear light</option>
+          <option value="srgb">sRGB</option>
+        </select>
+      </label>
+      <label class="fld"><span>Skip below (% weight)</span>
+        <input type="number" id="thresh" min="0" max="5" step="0.05" value="0.10">
+      </label>
+      <label class="chk"><input type="checkbox" id="density" checked> density bar</label>
+    </div>
+
+    <div class="sum">
+      <div><span class="k">generated</span><b id="s-gen">—</b></div>
+      <div><span class="k">to generate</span><b id="s-todo">—</b></div>
+      <div><span class="k">skippable</span><b id="s-unre">—</b></div>
+      <div><span class="k">mean ΔE</span><b id="s-de">—</b></div>
+      <div><span class="k">worst</span><b id="s-worst">—</b></div>
+      <div><span class="k">clamped at ceiling</span><b id="s-over">—</b></div>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Grid — x across (progress), y up (yellow → red)</h2>
+    <div class="grid" id="grid"></div>
+    <p class="axis" id="axis"></p>
+    <div class="legend" style="margin-top:10px">
+      <span><i class="hatch"></i>barely indexed — below the skip threshold</span>
+      <span><i class="dash"></i>not generated — showing target colour</span>
+      <span><i style="opacity:.62;background:#4a5058"></i>shares <code>x0_y0</code> (y undefined on green)</span>
+      <span><i class="acc"></i>occupancy density</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cell</h2>
+    <div class="det">
+      <div class="big" id="d-big"></div>
+      <div class="kv" id="d-kv"></div>
+    </div>
+  </div>
+
+  <p class="sub" style="margin-top:14px">
+    Images are read from <code>&lt;cell directory&gt;/x{col}_y{row}.png</code> — row 0 is
+    <code>y = 0</code> (turned yellow), the top row is the species' ceiling. Measuring a cell's
+    average reads its pixels, which a browser refuses on <code>file://</code>; serve the folder
+    (<code>python -m http.server</code>) or drop files onto cells instead. Generated cells must be
+    albedo only — no baked highlight, no cast shadow, no specular.
+  </p>
+
+</div>
+
+<script src="../model.js"></script>
+<script src="grid.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var M = window.LeafModel, G = window.LeafGrid;
+
+  var el = function (id) { return document.getElementById(id); };
+  var state = {
+    sp: 'bigtoothMaple',
+    space: 'linear',
+    density: true,
+    thresh: 0.10,     // % of blend weight below which a cell is not worth generating
+    cells: [],
+    occ: {},          // species key -> occupancy result, computed once
+    sel: null
+  };
+
+  /* ======================================================================
+   * Colour: sRGB <-> linear <-> CIELAB, and CIE76 dE.
+   * Blending and averaging happen in linear light (Step 3); dE is the
+   * README's yardstick, where ~2 is where a difference becomes visible.
+   * ==================================================================== */
+  function toLinear(c) {
+    c /= 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  function toSrgb(v) {
+    v = v < 0 ? 0 : v > 1 ? 1 : v;
+    return 255 * (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055);
+  }
+  function labOf(rgb) {
+    var r = toLinear(rgb[0]), g = toLinear(rgb[1]), b = toLinear(rgb[2]);
+    var X = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+    var Y = (0.2126 * r + 0.7152 * g + 0.0722 * b);
+    var Z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+    var f = function (t) {
+      return t > 0.008856 ? Math.pow(t, 1 / 3) : (7.787 * t) + 16 / 116;
+    };
+    var fx = f(X), fy = f(Y), fz = f(Z);
+    return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+  }
+  function deltaE(a, b) {
+    var p = labOf(a), q = labOf(b);
+    var dl = p[0] - q[0], da = p[1] - q[1], db = p[2] - q[2];
+    return Math.sqrt(dl * dl + da * da + db * db);
+  }
+
+  /* ======================================================================
+   * Occupancy — which cells the model actually visits.
+   *
+   * The same condition sweep the README's figures come from: tempOffset x
+   * cloudCover x winterPrecip x two seeds, one full season each. A cell is
+   * reachable if the bilinear blend ever draws any weight from it, which is
+   * the criterion that matters — a cell can never be the nearest and still
+   * be read on the way past.
+   * ==================================================================== */
+  var SWEEP = {
+    tempOffset: [-4, -2, 0, 2, 4],
+    cloudCover: [5, 25, 55, 85],
+    winterPrecip: [0.5, 1.0, 1.8],
+    seeds: [1, 7],
+    cols: 12, rows: 8            // 96 leaves of the one species per run
+  };
+
+  function sweepJobs() {
+    var jobs = [];
+    SWEEP.tempOffset.forEach(function (t) {
+      SWEEP.cloudCover.forEach(function (c) {
+        SWEEP.winterPrecip.forEach(function (w) {
+          SWEEP.seeds.forEach(function (s) {
+            jobs.push({ tempOffset: t, cloudCover: c, winterPrecip: w, seed: s });
+          });
+        });
+      });
+    });
+    return jobs;
+  }
+
+  function runOccupancy(sp, onProgress, onDone) {
+    var rows = G.rowsOf(sp), n = G.COLS * rows;
+    var acc = {
+      weight: new Float64Array(n),   // summed bilinear weight
+      hits: new Float64Array(n),     // nearest-cell counts
+      total: 0, over: 0, undef: 0
+    };
+    var jobs = sweepJobs(), at = 0, CHUNK = 8;
+
+    function add(col, row, w) { acc.weight[row * G.COLS + col] += w; }
+
+    function record(leaf) {
+      var ax = G.axesOf(leaf);
+      var cc = G.cellCoords(sp, ax);
+      acc.total++;
+      if (cc.overCeiling) acc.over++;
+
+      var c0 = Math.floor(cc.cx), fx = cc.cx - c0;
+      var c1 = Math.min(G.COLS - 1, c0 + 1);
+
+      if (!ax.yDefined) {
+        // Fully green: y means nothing, and every row of this column is the
+        // same image. Spread the weight evenly rather than inventing a row.
+        acc.undef++;
+        for (var r = 0; r < rows; r++) {
+          add(c0, r, (1 - fx) / rows);
+          add(c1, r, fx / rows);
+          acc.hits[r * G.COLS + Math.round(cc.cx)] += 1 / rows;
+        }
+        return;
+      }
+      var r0 = Math.floor(cc.cy), fy = cc.cy - r0;
+      var r1 = Math.min(rows - 1, r0 + 1);
+      add(c0, r0, (1 - fx) * (1 - fy));
+      add(c1, r0, fx * (1 - fy));
+      add(c0, r1, (1 - fx) * fy);
+      add(c1, r1, fx * fy);
+      acc.hits[Math.round(cc.cy) * G.COLS + Math.round(cc.cx)]++;
+    }
+
+    function chunk() {
+      var end = Math.min(jobs.length, at + CHUNK);
+      for (; at < end; at++) {
+        var j = jobs[at];
+        var sim = M.createSim({
+          cols: SWEEP.cols, rows: SWEEP.rows, mix: [sp], seed: j.seed,
+          controls: {
+            tempOffset: j.tempOffset,
+            cloudCover: j.cloudCover,
+            winterPrecip: j.winterPrecip
+          }
+        });
+        while (sim.step()) {
+          for (var i = 0; i < sim.leaves.length; i++) {
+            if (sim.leaves[i].attached) record(sim.leaves[i]);
+          }
+        }
+      }
+      if (at < jobs.length) {
+        onProgress(at / jobs.length);
+        setTimeout(chunk, 0);
+        return;
+      }
+      var sum = 0, max = 0, i;
+      for (i = 0; i < n; i++) { sum += acc.weight[i]; if (acc.weight[i] > max) max = acc.weight[i]; }
+      acc.share = new Float64Array(n);
+      acc.dens = new Float64Array(n);
+      for (i = 0; i < n; i++) {
+        acc.share[i] = sum ? acc.weight[i] / sum : 0;
+        // log scale: ~70% of all leaf-days sit in the green corner, so a
+        // linear density bar would show one cell and seven blanks.
+        acc.dens[i] = max ? Math.log1p(acc.weight[i]) / Math.log1p(max) : 0;
+      }
+      onDone(acc);
+    }
+    chunk();
+  }
+
+  /* ======================================================================
+   * Measuring a generated cell against its target.
+   * ==================================================================== */
+  var mcanvas = document.createElement('canvas');
+  var mctx = mcanvas.getContext('2d', { willReadFrequently: true });
+  var taintWarned = false;
+
+  function measure(img) {
+    var w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return null;
+    var scale = Math.min(1, 256 / Math.max(w, h));
+    w = Math.max(1, Math.round(w * scale));
+    h = Math.max(1, Math.round(h * scale));
+    mcanvas.width = w; mcanvas.height = h;
+    mctx.clearRect(0, 0, w, h);
+    mctx.drawImage(img, 0, 0, w, h);
+
+    var d;
+    try {
+      d = mctx.getImageData(0, 0, w, h).data;
+    } catch (e) {
+      if (!taintWarned) {
+        taintWarned = true;
+        note('Cannot read pixels — the browser blocks it on file://. Serve the folder over ' +
+             'http (python -m http.server) or drop files onto cells to measure them.', true);
+      }
+      return null;
+    }
+
+    // Alpha-weighted mean: only leaf pixels count, and a soft edge counts
+    // in proportion to how much leaf it is.
+    var lin = state.space === 'linear';
+    var r = 0, g = 0, b = 0, aSum = 0;
+    for (var i = 0; i < d.length; i += 4) {
+      var a = d[i + 3];
+      if (!a) continue;
+      aSum += a;
+      if (lin) {
+        r += toLinear(d[i]) * a; g += toLinear(d[i + 1]) * a; b += toLinear(d[i + 2]) * a;
+      } else {
+        r += d[i] * a; g += d[i + 1] * a; b += d[i + 2] * a;
+      }
+    }
+    if (!aSum) return { rgb: null, coverage: 0 };
+    var mean = lin
+      ? [toSrgb(r / aSum), toSrgb(g / aSum), toSrgb(b / aSum)]
+      : [r / aSum, g / aSum, b / aSum];
+    return {
+      rgb: mean.map(function (v) { return Math.round(v); }),
+      coverage: aSum / (255 * w * h)
+    };
+  }
+
+  /* ======================================================================
+   * Cells
+   * ==================================================================== */
+  function buildCells(sp) {
+    var rows = G.rowsOf(sp), out = [];
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < G.COLS; col++) {
+        var x = G.xAt(col), y = G.yAt(sp, row);
+        out.push({
+          col: col, row: row, x: x, y: y,
+          name: G.cellName(col, row),
+          target: G.cellColorRgb(sp, x, y),
+          // The left column is one image: on a fully green leaf y is
+          // undefined, so every row there resolves to the same picture.
+          shared: col === 0 && row > 0,
+          img: null, src: '', from: '', measured: null, dE: null, node: null
+        });
+      }
+    }
+    return out;
+  }
+
+  function cellAt(col, row) {
+    return state.cells[row * G.COLS + col];
+  }
+
+  function occOf(c) {
+    var o = state.occ[state.sp];
+    if (!o) return null;
+    var i = c.row * G.COLS + c.col;
+    return { share: o.share[i], dens: o.dens[i], weight: o.weight[i], hits: o.hits[i] };
+  }
+
+  /* How much of the model's life this cell accounts for.
+   *
+   *   'never' — no leaf-day ever draws any blend weight from it.
+   *   'rare'  — below the skip threshold: real but negligible, and the cells
+   *             around it will carry the interpolation on their own.
+   *
+   * Worth knowing: measured over the full sweep, NO cell of any species comes
+   * back 'never'. The grid rectangle is entirely, if thinly, used, so the skip
+   * threshold — not reachability — is what decides the generation budget. */
+  function rarity(c) {
+    var o = occOf(c);
+    if (!o) return 'ok';
+    if (o.weight <= 0) return 'never';
+    return o.share * 100 < state.thresh ? 'rare' : 'ok';
+  }
+  function skippable(c) { return rarity(c) !== 'ok'; }
+
+  /* ---- image loading --------------------------------------------------- */
+  function dirPath() {
+    var d = el('dir').value.trim();
+    if (d && d.slice(-1) !== '/') d += '/';
+    return d;
+  }
+
+  function loadAll() {
+    var dir = dirPath();
+    var pending = 0;
+    state.cells.forEach(function (c) {
+      if (c.shared) return;                 // mirrors x0_y0, never its own file
+      if (c.from === 'drop') return;        // a dropped file outranks the folder
+      pending++;
+      var img = new Image();
+      img.onload = function () {
+        setImage(c, img, dir + c.name + '.png', 'dir');
+        if (!--pending) done();
+      };
+      img.onerror = function () {
+        clearImage(c);
+        if (!--pending) done();
+      };
+      img.src = dir + c.name + '.png?t=' + Date.now();
+    });
+    if (!pending) done();
+
+    function done() { render(); imageNote(); }
+  }
+
+  // Kept separate from the occupancy progress line, which finishes later and
+  // would otherwise wipe this.
+  function imageNote() {
+    var any = state.cells.some(function (c) { return c.img; });
+    note(any ? '' : 'No images at ' + (dirPath() || './') +
+      ' — showing target colours only. That is the expected state until Step 1 ' +
+      'has generated some.');
+  }
+
+  function setImage(c, img, src, from) {
+    c.img = img; c.src = src; c.from = from;
+    var m = measure(img);
+    c.measured = m && m.rgb ? m : null;
+    c.coverage = m ? m.coverage : null;
+    c.dE = c.measured ? deltaE(c.measured.rgb, c.target) : null;
+  }
+
+  function clearImage(c) {
+    c.img = null; c.src = ''; c.from = ''; c.measured = null; c.dE = null; c.coverage = null;
+  }
+
+  // What a cell actually shows: the left column's rows borrow x0_y0.
+  function imageFor(c) {
+    return c.shared ? cellAt(0, 0) : c;
+  }
+
+  /* ======================================================================
+   * Render
+   * ==================================================================== */
+  function deClass(dE) {
+    if (dE == null) return 'none';
+    return dE < 2 ? 'ok' : dE < 5 ? 'warn' : 'bad';
+  }
+
+  function render() {
+    var grid = el('grid'), rows = G.rowsOf(state.sp);
+    grid.style.setProperty('--cols', G.COLS);
+    grid.innerHTML = '';
+
+    for (var row = rows - 1; row >= 0; row--) {
+      var yl = document.createElement('div');
+      yl.className = 'ylab';
+      yl.innerHTML = '<b>' + G.yAt(state.sp, row).toFixed(2) + '</b><span>y' + row + '</span>';
+      grid.appendChild(yl);
+      for (var col = 0; col < G.COLS; col++) grid.appendChild(cellNode(cellAt(col, row)));
+    }
+
+    grid.appendChild(document.createElement('div'));
+    for (var c2 = 0; c2 < G.COLS; c2++) {
+      var xl = document.createElement('div');
+      xl.className = 'xlab';
+      xl.textContent = G.xAt(c2).toFixed(2);
+      grid.appendChild(xl);
+    }
+
+    el('axis').textContent =
+      'x — how far through the change: 0 full green, 0.5 fully turned, 1.0 dead brown.   ' +
+      'y — which way it turned: 0 yellow, ' + G.ceilingOf(state.sp).toFixed(2) +
+      ' the reddest this species is ever driven.';
+
+    summarise();
+    detail(state.sel);
+  }
+
+  function cellNode(c) {
+    var src = imageFor(c);
+    var node = document.createElement('div');
+    var rare = rarity(c);
+    node.className = 'cell' +
+      (c.shared ? ' shared' : '') +
+      (rare === 'ok' ? '' : ' unreached') +
+      (state.sel === c ? ' sel' : '');
+    c.node = node;
+
+    var art = document.createElement('div');
+    art.className = 'art';
+
+    var tgt = document.createElement('div');
+    tgt.className = 'target';
+    tgt.style.background = G.toHex(c.target);
+    art.appendChild(tgt);
+
+    var shot = document.createElement('div');
+    shot.className = 'shot';
+    if (src.img) {
+      var im = document.createElement('img');
+      im.src = src.img.src;
+      shot.appendChild(im);
+    } else {
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.style.background = G.toHex(c.target);
+      shot.appendChild(e);
+    }
+    var label = c.shared ? tag('shares x0_y0', true)
+      : rare === 'never' ? tag('never indexed')
+      : rare === 'rare' ? tag('barely indexed')
+      : src.img ? null
+      : tag('not generated', true);
+    if (label) shot.appendChild(label);
+    art.appendChild(shot);
+
+    var o = occOf(c);
+    if (o && state.density) {
+      var bar = document.createElement('div');
+      bar.className = 'dens';
+      bar.style.width = (o.dens * 100).toFixed(1) + '%';
+      art.appendChild(bar);
+    }
+    node.appendChild(art);
+
+    var foot = document.createElement('div');
+    foot.className = 'foot';
+    var de = c.dE == null && c.shared && src.dE != null ? src.dE : c.dE;
+    foot.innerHTML =
+      '<span class="nm">' + c.name + '</span>' +
+      '<span class="de ' + deClass(de) + '">' +
+      (de == null ? '—' : 'ΔE ' + de.toFixed(1)) + '</span>';
+    node.appendChild(foot);
+
+    node.addEventListener('click', function () { state.sel = c; render(); });
+    wireDrop(node, c);
+    return node;
+  }
+
+  function tag(text, soft) {
+    var t = document.createElement('span');
+    t.className = 'note' + (soft ? ' soft' : '');
+    t.textContent = text;
+    return t;
+  }
+
+  function wireDrop(node, c) {
+    var target = c.shared ? cellAt(0, 0) : c;
+    node.addEventListener('dragover', function (ev) {
+      ev.preventDefault(); node.classList.add('drop');
+    });
+    node.addEventListener('dragleave', function () { node.classList.remove('drop'); });
+    node.addEventListener('drop', function (ev) {
+      ev.preventDefault(); node.classList.remove('drop');
+      var f = ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (f) loadFileInto(target, f, render);
+    });
+  }
+
+  function loadFileInto(c, file, done) {
+    var img = new Image();
+    img.onload = function () { setImage(c, img, file.name, 'drop'); done(); };
+    img.onerror = function () { note('Could not read ' + file.name, true); done(); };
+    img.src = URL.createObjectURL(file);
+  }
+
+  /* ---- summary --------------------------------------------------------- */
+  function summarise() {
+    var needed = 0, have = 0, never = 0, rare = 0, sum = 0, n = 0, worst = null;
+    state.cells.forEach(function (c) {
+      var r = rarity(c);
+      if (r === 'never') never++;
+      if (r === 'rare') rare++;
+      if (c.shared || r !== 'ok') return;    // shared cells are not their own image
+      needed++;
+      if (c.img) have++;
+      if (c.dE != null) {
+        sum += c.dE; n++;
+        if (!worst || c.dE > worst.dE) worst = c;
+      }
+    });
+
+    el('s-gen').textContent = have + ' / ' + needed;
+    el('s-todo').textContent = String(needed - have);
+    el('s-unre').textContent = state.occ[state.sp]
+      ? (never + rare) + '  (' + never + ' never, ' + rare + ' rare)'
+      : '—';
+    el('s-de').textContent = n ? (sum / n).toFixed(2) : '—';
+    el('s-de').className = n ? 'de ' + deClass(sum / n) : '';
+    el('s-worst').textContent = worst ? worst.name + '  ΔE ' + worst.dE.toFixed(1) : '—';
+
+    var o = state.occ[state.sp];
+    el('s-over').textContent = o
+      ? (100 * o.over / o.total).toFixed(2) + '% of leaf-days'
+      : 'measuring…';
+  }
+
+  /* ---- detail ---------------------------------------------------------- */
+  function detail(c) {
+    var big = el('d-big'), kv = el('d-kv');
+    big.innerHTML = ''; kv.innerHTML = '';
+    if (!c) {
+      kv.innerHTML = '<div class="k">—</div><div class="v">Click a cell.</div>';
+      return;
+    }
+    var src = imageFor(c);
+
+    var tgt = document.createElement('div');
+    tgt.className = 'target';
+    tgt.style.background = G.toHex(c.target);
+    big.appendChild(tgt);
+    var shot = document.createElement('div');
+    shot.className = 'shot';
+    if (src.img) {
+      var im = document.createElement('img');
+      im.src = src.img.src;
+      shot.appendChild(im);
+    } else {
+      var e = document.createElement('div');
+      e.className = 'empty';
+      e.style.background = G.toHex(c.target);
+      shot.appendChild(e);
+    }
+    big.appendChild(shot);
+
+    var leaf = G.referenceLeaf(state.sp, c.x, c.y);
+    var o = occOf(c);
+    var m = c.measured || (c.shared ? src.measured : null);
+    var dE = c.dE != null ? c.dE : (c.shared ? src.dE : null);
+
+    var rowsOut = [
+      ['cell', '<code>' + c.name + '.png</code>' +
+        (c.shared ? ' — not generated; the left column is one image, ' +
+                    'y is undefined on a fully green leaf' : '')],
+      ['position', 'x = ' + c.x.toFixed(3) + ',  y = ' + c.y.toFixed(3)],
+      ['pigment', 'chl ' + leaf.chlorophyll.toFixed(3) +
+        ' · car ' + leaf.carotenoid.toFixed(3) +
+        ' · anth ' + leaf.anthocyanin.toFixed(3) +
+        ' · tan ' + leaf.tannin.toFixed(3)],
+      ['target', swatch(c.target) + '<code>' + G.toHex(c.target) + '</code>  rgb(' +
+        c.target.join(', ') + ')'],
+      ['measured', m && m.rgb
+        ? swatch(m.rgb) + '<code>' + G.toHex(m.rgb) + '</code>  α-weighted mean, ' +
+          (state.space === 'linear' ? 'linear light' : 'sRGB')
+        : (src.img ? 'not readable' : 'no image')],
+      ['ΔE', dE == null ? '—'
+        : '<b class="de ' + deClass(dE) + '">' + dE.toFixed(2) + '</b>' +
+          (dE < 2 ? '  within the visible-difference threshold' : '')],
+      ['alpha coverage', src.coverage != null
+        ? (100 * src.coverage).toFixed(1) + '% of the frame' : '—'],
+      ['source', src.img ? (src.from === 'drop' ? 'dropped file — ' : '') + src.src : '—'],
+      ['occupancy', o
+        ? (100 * o.share).toFixed(3) + '% of blend weight, ' +
+          (100 * o.hits / state.occ[state.sp].total).toFixed(3) + '% nearest' +
+          (rarity(c) === 'never' ? '  — never indexed, do not generate'
+            : rarity(c) === 'rare' ? '  — below the skip threshold' : '')
+        : 'measuring…']
+    ];
+    rowsOut.forEach(function (r) {
+      kv.insertAdjacentHTML('beforeend',
+        '<div class="k">' + r[0] + '</div><div class="v">' + r[1] + '</div>');
+    });
+  }
+
+  function swatch(rgb) {
+    return '<span class="sw" style="background:' + G.toHex(rgb) + '"></span>';
+  }
+
+  function note(text, isErr) {
+    var m = el('msg');
+    m.textContent = text || '';
+    m.className = 'msg' + (isErr ? ' err' : '');
+  }
+
+  /* ======================================================================
+   * Wiring
+   * ==================================================================== */
+  function defaultDir(sp) { return 'cells/' + sp + '/'; }
+
+  function selectSpecies(sp) {
+    var prev = state.sp;
+    if (el('dir').value.trim() === defaultDir(prev)) el('dir').value = defaultDir(sp);
+    state.sp = sp;
+    state.cells = buildCells(sp);
+    state.sel = state.cells[0];
+    render();
+    ensureOccupancy(sp);
+    loadAll();
+  }
+
+  function ensureOccupancy(sp) {
+    if (state.occ[sp]) { render(); return; }
+    note('Measuring which cells the model reaches — ' +
+         (SWEEP.tempOffset.length * SWEEP.cloudCover.length *
+          SWEEP.winterPrecip.length * SWEEP.seeds.length) + ' seasons…');
+    setTimeout(function () {
+      runOccupancy(sp, function () {}, function (acc) {
+        state.occ[sp] = acc;
+        render();
+        imageNote();
+      });
+    }, 0);
+  }
+
+  // ?species=gambelOak&dir=cells/oak-v2/ — so a particular grid can be linked to.
+  var qs = new URLSearchParams(location.search);
+  var qsp = qs.get('species');
+  if (qsp && G.ROWS[qsp]) state.sp = qsp;
+
+  var sel = el('species');
+  G.SPECIES_ORDER.forEach(function (sp) {
+    var o = document.createElement('option');
+    o.value = sp;
+    o.textContent = M.SPECIES[sp].name + '  (' + G.COLS + ' × ' + G.rowsOf(sp) + ')';
+    sel.appendChild(o);
+  });
+  sel.value = state.sp;
+  sel.addEventListener('change', function () { selectSpecies(sel.value); });
+
+  el('dir').value = qs.get('dir') || defaultDir(state.sp);
+  el('reload').addEventListener('click', loadAll);
+  el('dir').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadAll(); });
+
+  el('space').addEventListener('change', function () {
+    state.space = el('space').value;
+    state.cells.forEach(function (c) {
+      if (c.img) setImage(c, c.img, c.src, c.from);
+    });
+    render();
+  });
+
+  el('density').addEventListener('change', function () {
+    state.density = el('density').checked;
+    render();
+  });
+
+  el('thresh').addEventListener('input', function () {
+    var v = parseFloat(el('thresh').value);
+    state.thresh = isNaN(v) ? 0 : v;
+    render();
+  });
+
+  el('pick').addEventListener('click', function () { el('picker').click(); });
+  el('picker').addEventListener('change', function () {
+    var files = Array.prototype.slice.call(el('picker').files);
+    var re = /x(\d+)_y(\d+)\.png$/i;
+    var pending = 0, matched = 0;
+    files.forEach(function (f) {
+      var m = re.exec(f.name);
+      if (!m) return;
+      var col = +m[1], row = +m[2];
+      if (col >= G.COLS || row >= G.rowsOf(state.sp)) return;
+      matched++; pending++;
+      loadFileInto(cellAt(col, row), f, function () { if (!--pending) render(); });
+    });
+    note(matched
+      ? 'Loaded ' + matched + ' file(s) matching x{col}_y{row}.png.'
+      : 'No files named x{col}_y{row}.png in that folder.', !matched);
+    if (!pending) render();
+  });
+
+  // Dropping anywhere else should not navigate away from the page.
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.addEventListener('drop', function (e) { e.preventDefault(); });
+
+  selectSpecies(state.sp);
+})();
+</script>
+</body>
+</html>
