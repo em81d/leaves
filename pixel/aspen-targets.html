@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aspen target colours</title>
+<style>
+  :root {
+    --bg: #16191d;
+    --panel: #1e2228;
+    --line: #333941;
+    --text: #dfe3e8;
+    --dim: #8b939d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
+  h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .2px; }
+  .sub { color: var(--dim); font-size: 11.5px; margin: 0 0 14px; max-width: 76ch; }
+  .sub code { color: #b9c2cc; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 44px repeat(var(--cols), minmax(0, 1fr));
+    gap: 7px;
+  }
+  .ylab, .xlab {
+    color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cell {
+    border: 1px solid var(--line); border-radius: 5px; overflow: hidden;
+    background: var(--panel);
+  }
+  .sw { aspect-ratio: 1 / 1; }
+  .cap {
+    font: 11px/1.4 ui-monospace, Consolas, monospace;
+    text-align: center; padding: 4px 2px; color: var(--dim);
+  }
+  .cap b { display: block; color: var(--text); font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Aspen target colours <span style="color:var(--dim);font-weight:400">— Quaking aspen</span></h1>
+  <p class="sub">
+    The colour each aspen cell must average to, straight from <code>pixel/grid.js</code> against
+    the live <code>model.js</code> — no images, no measuring. Two rows, because aspen's red share
+    only spans 0.01–0.36 (<code>Y_CEILING</code> 0.36) and is flat in x. Row 0 is
+    <code>y = 0</code>; the top row is the ceiling. x runs left to right, green → brown.
+  </p>
+
+  <div class="panel">
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<script src="../model.js"></script>
+<script src="grid.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var G = window.LeafGrid;
+  var SP = 'aspen';
+
+  var grid = document.getElementById('grid');
+  var rows = G.rowsOf(SP);
+  grid.style.setProperty('--cols', G.COLS);
+
+  function add(cls, html) {
+    var d = document.createElement('div');
+    d.className = cls;
+    d.innerHTML = html;
+    grid.appendChild(d);
+    return d;
+  }
+
+  /* Top row first: y increases up the page, the way the grid is drawn. */
+  for (var row = rows - 1; row >= 0; row--) {
+    var y = G.yAt(SP, row);
+    add('ylab', 'y ' + y.toFixed(2));
+    for (var col = 0; col < G.COLS; col++) {
+      var x = G.xAt(col);
+      var rgb = G.cellColorRgb(SP, x, y);
+      var hex = G.toHex(rgb);
+      var c = add('cell',
+        '<div class="sw" style="background:' + hex + '"></div>' +
+        '<div class="cap"><b>' + hex + '</b>' + G.cellName(col, row) + '</div>');
+      c.title = G.cellName(col, row) + '  x=' + x.toFixed(3) + '  y=' + y.toFixed(3) +
+                '  rgb(' + rgb.join(', ') + ')';
+    }
+  }
+
+  add('ylab', '');
+  for (var k = 0; k < G.COLS; k++) add('xlab', 'x ' + G.xAt(k).toFixed(2));
+})();
+</script>
+</body>
+</html>
