@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One leaf, one season</title>
+<style>
+
+  @import url("https://fonts.googleapis.com/css?family=Kranky|Rock+3D|Montserrat|Lavishly+Yours"); 
+  /* A demo, not an instrument panel. The stage holds the leaf and nothing
+     else; every number the earlier build drew on the canvas now lives behind
+     a checkbox in the controls. Warm ink so the leaf is the only cool-to-warm
+     transition on the page. */
+  :root {
+    --ink:    #f4ece0;
+    --dim:    #a9998a;
+    --faint:  #7d7065;
+    --glass:  rgba(28, 22, 17, 0.62);
+    --line:   rgba(244, 236, 224, 0.11);
+    --accent: #e0a251;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden; background: #302822; color: var(--ink);
+    font: 12.5px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #c { 
+    position: fixed; 
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 1200px;           
+    padding: 5px;
+    aspect-ratio: 622 / 350;
+    display: block;
+  -webkit-mask-image: url(brush-mask-solid.png);
+          mask-image: url(brush-mask-solid.png);
+  -webkit-mask-size: 100% 100%;
+          mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+          mask-repeat: no-repeat;
+
+  }
+
+  .hud { position: fixed; z-index: 2; }
+  .card {
+    background: var(--glass); border: 1px solid var(--line); border-radius: 0px;
+    padding: 14px 16px; backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px);
+    box-shadow: 0 10px 34px rgba(0,0,0,.42);
+  }
+  code { font-size: 11px; opacity: .92; }
+
+  /* ------------------------------------------------ left stack: two cards */
+  #left {
+    top: 18px; left: 18px; width: 292px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+
+  /* card one — where the season is right now */
+  #date { display: flex; align-items: baseline; gap: 10px; margin: 0 0 3px; font-family: "Kranky";}
+  #date .d { font-size: 27px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+  #date .n { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+  #seasonbar { height: 3px; border-radius: 2px; background: rgba(255,255,255,.09);
+               overflow: hidden; margin: 9px 0 12px; }
+  #seasonbar i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .env { display: grid; grid-template-columns: auto auto; gap: 5px 16px; font-size: 11.5px; font-family: "Montserrat";}
+  .env span:nth-child(odd) { color: var(--dim); }
+  .env span:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .05em;
+  }
+  .badge.frost  { background: #2b4b6b; color: #d5e9ff; }
+  .badge.freeze { background: #6b2b33; color: #ffdde1; }
+  .badge.none   { background: rgba(255,255,255,.07); color: var(--dim); }
+  .badge.held   { background: rgba(95,158,74,.20); color: #a7d392; }
+  .badge.fallen { background: rgba(224,162,81,.18); color: var(--accent); }
+
+  /* card two — what the thing is */
+  #about h1 { margin: 0 0 6px; font-size: 30px; font-weight: 600; letter-spacing: .1px; font-family: "Kranky";}
+  #about p { margin: 0 0 9px; color: var(--dim); font-size: 11.5px; line-height: 1.62; font-family: "Montserrat";}
+  #about p:last-child { margin-bottom: 0; }
+  #about em { color: var(--ink); font-style: normal; }
+
+  /* ------------------------------------------------------- the right rail */
+  /* Empty by default. Everything that used to sit here permanently — the grid
+     map, the perf line — is now opt-in, so the default view is just a leaf. */
+  /* Both cards open is taller than a short window, so the rail scrolls rather
+     than letting the map run off the bottom edge. */
+  #rail {
+    top: 18px; right: 18px; width: 272px;
+    max-height: calc(100vh - 36px); overflow-y: auto; overflow-x: hidden;
+    display: flex; flex-direction: column; gap: 12px;
+    scrollbar-width: thin; scrollbar-color: rgba(244,236,224,.16) transparent;
+  }
+  #rail > .card { flex: 0 0 auto; margin-right: 8px; }
+  #rail::-webkit-scrollbar { width: 6px; }
+  #rail::-webkit-scrollbar-thumb { background: rgba(244,236,224,.16); border-radius: 3px; }
+  #rail::-webkit-scrollbar-track { background: transparent; }
+  .panel-h {
+    margin: 0 0 10px; font-size: 9.5px; text-transform: uppercase;
+    letter-spacing: .11em; color: var(--faint); font-weight: 650;
+  }
+  #gridmap { display: none; }
+  #gridmap.open { display: block; }
+  #mapc { display: block; width: 100%; height: auto; border-radius: 6px; }
+  .axl { display: flex; justify-content: space-between; color: var(--faint);
+         font-size: 10px; margin-top: 6px; }
+  .axread {
+    margin-top: 9px; font: 600 11.5px ui-monospace, Consolas, monospace;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+    display: flex; justify-content: space-between;
+  }
+  .axread span { color: var(--faint); font-weight: 400; }
+  .maplegend { color: var(--faint); font-size: 10.5px; margin: 8px 0 0; line-height: 1.5; }
+
+  #panel { display: none; }
+  #panel.open { display: block; }
+  .ctl { margin-bottom: 12px; }
+  .ctl label { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; font-size: 11.5px; }
+  .ctl label span { color: var(--dim); }
+  .ctl label b { color: var(--accent); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { width: 100%; margin: 0; }
+  .hr { height: 1px; background: var(--line); margin: 14px 0; }
+  .row { display: flex; gap: 7px; }
+  .row button { flex: 1; }
+  .chk { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 11.5px; margin-top: 9px; cursor: pointer; }
+  .chk:hover { color: var(--ink); }
+  .chk input { accent-color: var(--accent); }
+  .foot { color: var(--faint); font-size: 10.5px; margin: 12px 0 0; line-height: 1.55; }
+  .k { display: inline-block; padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; font-size: 10px; }
+  #perf { display: none; font-family: ui-monospace, Consolas, monospace; font-size: 9.5px; }
+  #perf.open { display: block; }
+
+  /* ------------------------------------------------------- transport bar */
+  #bar { bottom: 18px; left: 50%; transform: translateX(-50%); }
+  #bar .card { display: flex; align-items: center; gap: 13px; padding: 9px 13px; border-radius: 10px; }
+  button {
+    background: rgba(255,255,255,.07); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 12px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(255,255,255,.14); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 650; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #1a1206; font-weight: 650; }
+  #prog { width: 210px; height: 4px; border-radius: 3px; background: rgba(255,255,255,.12); overflow: hidden; }
+  #prog i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .spd { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 11px; }
+  input[type=range] { accent-color: var(--accent); }
+  .spd input { width: 84px; }
+  .spd b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* ---------------------------------------------------------------- boot */
+  #boot {
+    position: fixed; inset: 0; z-index: 9; display: grid; place-items: center;
+    background: #0b0908; text-align: center; padding: 24px;
+  }
+  #boot .in { max-width: 460px; }
+  #boot h2 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+  #boot p { color: var(--dim); margin: 0 0 15px; }
+  #bootbar { width: 260px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.12);
+             overflow: hidden; margin: 0 auto; }
+  #bootbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  #boot.err h2 { color: #e8907f; }
+  #boot code { background: rgba(255,255,255,.07); padding: 2px 6px; border-radius: 4px; }
+
+  @media (max-width: 980px) {
+    #left { width: 246px; }
+    #date .d { font-size: 22px;}
+    #prog { width: 110px; }
+    .spd { display: none; }
+  }
+  @media (max-width: 700px) {
+    #left { right: 18px; width: auto; }
+    #about { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<div class="hud" id="left">
+
+  <div class="card" id="about">
+    <h1>Simulated color change</h1>
+    <p>Every fall, leaves change color based on measurable environmental conditions. 
+      Depending on which chemicals are present in a leaf at a given time, oranges, reds, yellows, and browns
+       manifest differently. This program visualizes those chemical changes in real time. 
+    </p>
+    <p>Try scanning the QR code to change the amount of cloud cover, wind, and monthly temperature to see how the leaf reacts!</p>
+  </div>
+
+  <div class="card" id="tracker">
+    <div id="date"><span class="d" id="oDate">Aug 1</span><span class="n" id="oDay">day 0 / 120</span></div>
+    <div id="seasonbar"><i id="seasonFill"></i></div>
+    <div class="env">
+      <span>Night low</span><span id="oTmin">&mdash;</span>
+      <span>Daylength</span><span id="oLen">&mdash;</span>
+      <span>Sunlight</span><span id="oSun">&mdash;</span>
+      <span>Gust</span><span id="oGust">&mdash;</span>
+      <span>Precip</span><span id="oPrecip">&mdash;</span>
+      <span>Overnight</span><span id="oFrost">&mdash;</span>
+      <span>Leaf</span><span id="oHeld">&mdash;</span>
+    </div>
+  </div>
+
+</div>
+
+<div class="hud" id="rail">
+
+  <div class="card" id="panel">
+    <div class="panel-h">Season environment</div>
+    <div class="ctl"><label for="temp"><span>Temperature</span><b id="tempV">0.0 &deg;C</b></label>
+      <input type="range" id="temp" min="-6" max="6" step="0.5" value="0"></div>
+    <div class="ctl"><label for="winterPrecip"><span>Winter precip (Jan&ndash;Mar)</span><b id="winterPrecipV">1.00 &times;</b></label>
+      <input type="range" id="winterPrecip" min="0.3" max="1.8" step="0.05" value="1"></div>
+    <div class="ctl"><label for="cloud"><span>Cloud cover</span><b id="cloudV">25 %</b></label>
+      <input type="range" id="cloud" min="0" max="100" step="1" value="25"></div>
+    <div class="ctl"><label for="wind"><span>Mean wind</span><b id="windV">3.0 m/s</b></label>
+      <input type="range" id="wind" min="0" max="12" step="0.25" value="3"></div>
+    <div class="ctl"><label for="precip"><span>In-season rain</span><b id="precipV">1.00 &times;</b></label>
+      <input type="range" id="precip" min="0" max="3" step="0.05" value="1"></div>
+    <div class="ctl"><label for="lat"><span>Latitude</span><b id="latV">40.6 &deg;N</b></label>
+      <input type="range" id="lat" min="30" max="46" step="0.5" value="40.65"></div>
+
+    <div class="hr"></div>
+    <div class="panel-h">This leaf</div>
+    <div class="row">
+      <button id="reseed">New leaf</button>
+      <button id="replay">Replay season</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="loopSeason" checked> Loop into a new season</label>
+
+    <div class="hr"></div>
+    <div class="panel-h">Show</div>
+    <label class="chk"><input type="checkbox" id="showBars"> Pigment bars</label>
+    <label class="chk"><input type="checkbox" id="showMap"> Grid position map</label>
+    <label class="chk"><input type="checkbox" id="showFlat"> Flat <code>M.leafColor</code> instead</label>
+    <label class="chk"><input type="checkbox" id="showPerf"> Performance readout</label>
+    <p class="foot" id="perf">&mdash;</p>
+
+    <p class="foot">Weather takes effect going forward &mdash; a leaf already brown
+      does not go back.<br>
+      <span class="k">Space</span> play &nbsp; <span class="k">&rarr;</span> step a day &nbsp;
+      <span class="k">B</span> bars &nbsp; <span class="k">G</span> map &nbsp;
+      <span class="k">F</span> flat &nbsp; <span class="k">C</span> controls</p>
+  </div>
+
+  <div class="card" id="gridmap">
+    <div class="panel-h">Where it sits in the grid</div>
+    <canvas id="mapc" width="440" height="330"></canvas>
+    <div class="axl"><span>x 0 &mdash; full green</span><span>dead brown &mdash; 1</span></div>
+    <div class="axread"><span>x</span><b id="axX">&mdash;</b><span>y</span><b id="axY">&mdash;</b></div>
+    <p class="maplegend">Cells are the generated images at their measured colour.
+      The dot is this leaf; the ring is the quad being blended.</p>
+  </div>
+
+</div>
+
+<div class="hud" id="bar">
+  <div class="card">
+    <button class="primary" id="play">Pause</button>
+    <button id="stepBtn">Step</button>
+    <div id="prog"><i id="progFill"></i></div>
+    <div class="spd"><span>speed</span><input type="range" id="speed" min="0.25" max="6" step="0.25" value="1.5"><b id="speedV">1.5&times;</b></div>
+    <button id="cfg">Controls</button>
+  </div>
+</div>
+
+<div id="boot"><div class="in">
+  <h2 id="bootH">Loading cells</h2>
+  <p id="bootP">Putting each into leaf space.</p>
+  <div id="bootbar"><i id="bootFill"></i></div>
+</div></div>
+
+<script src="../model.js"></script>
+<script src="grid.js"></script>
+<script src="leafspace.js"></script>
+<script src="interpolate.js"></script>
+<script>
+/* ============================================================================
+ * One leaf, one season — the demo cut of leaf-season.html.
+ *
+ * Nothing biological is decided here. A single maple leaf comes from
+ * M.createSim(), is advanced one simulated day at a time by the model, and
+ * each frame is asked one question — where are you in the grid? — via
+ * LeafGrid.axesOf(). The answer indexes the image. This file owns layout and
+ * the transport, and nothing else.
+ *
+ * The difference from leaf-season.html is entirely presentational: one leaf
+ * instead of four so it can be large, and every diagnostic — pigment bars,
+ * grid map, perf — moved behind a checkbox so the default frame is a leaf on
+ * a dark stage.
+ * ==========================================================================*/
+'use strict';
+
+var M = window.LeafModel, G = window.LeafGrid;
+var SPECIES = 'bigtoothMaple';
+
+var el = function (id) { return document.getElementById(id); };
+var cv = el('c'), ctx = cv.getContext('2d');
+var interp = null, sim = null, dpr = 1;
+var playing = true, acc = 0, lastT = 0;
+
+/* ------------------------------------------------------------------ boot */
+LeafInterp.load({
+  species: SPECIES,
+  /* Twice the module default. x spans 7 cell intervals, so 6 substeps is 42
+     distinct composites across a whole season — one new image roughly every
+     three simulated days, which at a leaf this size reads as a visible pop.
+     12 halves the interval to ~1.4 days. There is no point going further:
+     the model only advances in whole days, so at the default 1.5x transport
+     (~4.8 days a second) the day step becomes the binding constraint. */
+  substeps: 12,
+  /* Measured: a season now visits 96 distinct composites (28 before the glide
+     went in). Sized above that so a replay of the same seed is all hits rather
+     than evicting the path exactly as it wraps. ~128 MB at 512 px — the one
+     real cost of this change. */
+  cacheMax: 128,
+  onProgress: function (done, total) {
+    el('bootFill').style.width = (100 * done / total).toFixed(0) + '%';
+    el('bootH').textContent = 'Loading cells — ' + done + ' / ' + total;
+  }
+}).then(function (gi) {
+  interp = gi;
+  el('boot').style.display = 'none';
+  start();
+}).catch(function (err) {
+  var b = el('boot');
+  b.className = 'err';
+  el('bootH').textContent = 'Could not load the grid';
+  el('bootP').innerHTML = String(err.message || err) +
+    '<br><br>Browsers refuse to read image pixels over <code>file://</code>. ' +
+    'Serve the repo root — <code>python -m http.server</code> — and open ' +
+    '<code>/pixel/demo.html</code>.';
+  el('bootbar').style.display = 'none';
+});
+
+function start() {
+  resize();
+  window.addEventListener('resize', resize);
+  var q = applyQuery();
+  buildSim(q.seed == null ? 20260910 : q.seed);
+  labels();
+  /* ?day=62 runs the season forward without drawing, so a particular day of a
+     particular season is reproducible from a URL — for a screenshot, or to put
+     two settings side by side. */
+  /* markCoords after the run-up, not during it: the glide has no meaning for
+     days that were never drawn, and without this the picture would sit on the
+     day-0 composite while every readout showed the day asked for. */
+  if (q.day) { for (var d = 0; d < q.day && sim.step(); d++); markCoords(true); refreshHud(); }
+  if (q.paused || q.day) setPlaying(false);
+  lastT = performance.now();
+  requestAnimationFrame(frame);
+}
+
+/* ?day=62&paused=1&flat=1&controls=1&bars=1&map=1&temp=-2&cloud=70&seed=9 */
+function applyQuery() {
+  var out = {}, p = {}, q = window.location.search;
+  if (!q || q.length < 2) return out;
+  q.slice(1).split('&').forEach(function (kv) {
+    var i = kv.indexOf('=');
+    p[decodeURIComponent(i < 0 ? kv : kv.slice(0, i))] = i < 0 ? '1' : decodeURIComponent(kv.slice(i + 1));
+  });
+  var sliders = { temp: 'temp', cloud: 'cloud', wind: 'wind', precip: 'precip',
+                  winterPrecip: 'winterPrecip', lat: 'lat', speed: 'speed' };
+  for (var k in sliders) if (p[k] != null) el(sliders[k]).value = p[k];
+  if (p.flat) el('showFlat').checked = true;
+  if (p.bars) el('showBars').checked = true;
+  if (p.map)  el('showMap').checked = true;
+  if (p.perf) el('showPerf').checked = true;
+  if (p.controls) { el('panel').classList.add('open'); el('cfg').classList.add('on'); }
+  syncToggles();
+  if (p.day) out.day = Math.max(0, Math.min(M.SEASON_DAYS, parseInt(p.day, 10) || 0));
+  if (p.paused) out.paused = true;
+  if (p.seed != null) out.seed = (parseInt(p.seed, 10) || 0) >>> 0;
+  if (p.loop === '0') el('loopSeason').checked = false;
+  return out;
+}
+
+/* ------------------------------------------------------------------- sim */
+/* Where the leaf sat yesterday and where it sits today, in continuous cell
+ * coordinates. The model advances in whole days and a leaf is stationary in
+ * the grid on most of them — a season visits only ~34 distinct positions,
+ * nearly all of them between senescence and fall — so drawing the current
+ * day's position alone is what makes the change read as a series of pops.
+ * Keeping both lets the draw show the point between them that the transport's
+ * fractional day has actually reached. */
+var prevCC = null, curCC = null;
+
+/* The blended position the current frame is actually drawing, so the grid map
+   marks the image on screen rather than a day the picture has not reached. */
+var shownCC = null;
+
+function markCoords(reset) {
+  if (!interp) return;
+  curCC = interp.coordsOf(sim.leaves[0]);
+  if (reset || !prevCC) prevCC = curCC;
+}
+
+function buildSim(seed) {
+  sim = M.createSim({
+    cols: 1, rows: 1, mix: [SPECIES], seed: seed,
+    controls: readControls()
+  });
+  sim.reset();
+  markCoords(true);
+  refreshHud();
+}
+
+function readControls() {
+  return {
+    tempOffset: parseFloat(el('temp').value),
+    cloudCover: parseFloat(el('cloud').value),
+    windMean: parseFloat(el('wind').value),
+    precipMult: parseFloat(el('precip').value),
+    winterPrecip: parseFloat(el('winterPrecip').value),
+    latitude: parseFloat(el('lat').value)
+  };
+}
+
+function pushControls() {
+  var c = readControls();
+  for (var k in c) sim.controls[k] = c[k];
+}
+
+/* ------------------------------------------------------------------ loop */
+function frame(t) {
+  var dt = Math.min(0.1, (t - lastT) / 1000);
+  lastT = t;
+
+  if (playing) {
+    acc += dt * parseFloat(el('speed').value) * 3.2;      // ~3 sim days a second at 1x
+    while (acc >= 1) {
+      acc -= 1;
+      var wasAt = curCC;
+      if (!sim.step()) {
+        if (el('loopSeason').checked) { buildSim((sim.seed * 1664525 + 1013904223) >>> 0); }
+        else { setPlaying(false); }
+        break;
+      }
+      prevCC = wasAt;
+      markCoords(false);
+      refreshHud();
+    }
+  }
+
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* -------------------------------------------------------------- the draw */
+function draw() {
+  var W = cv.width / dpr, H = cv.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#dfcebf');
+  g.addColorStop(1, '#b6a79a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  var flat = el('showFlat').checked;
+  var barsOn = el('showBars').checked;
+  var leaf = sim.leaves[0];
+
+  /* The stage is what the cards actually leave, not a fraction of the window.
+     The right rail only takes room when something in it is open, which is the
+     whole point of the default view: with the rail closed the leaf is free to
+     grow across most of the screen. */
+  var padL = W*0.09;
+  var padR = W*0.09;
+  var topClear = H*0.08;
+  var bottomClear = H - H*0.12;
+
+  var stageW = Math.max(160, W - padL - padR);
+  var stageH = Math.max(120, bottomClear - topClear);
+
+  var BARS_H = barsOn ? 86 : 0;
+  var FALL_DROP = Math.min(96, stageH * 0.10);
+  /* Simulated days the fall takes, so it keeps pace with the transport rather
+     than running at a fixed wall-clock speed the rest of the scene ignores. */
+  var FALL_DAYS = 6;
+  var availH = Math.max(80, stageH - BARS_H - FALL_DROP);
+
+  /* 0.92 of whichever dimension binds. One leaf means the constraint is
+     usually height, and on a wide window that is a very large leaf — the 512px
+     source is upscaled and goes soft, which is the trade this cut accepts. */
+  var leafH = Math.min(availH * 0.92, (stageW * 0.92) / interp.aspect);
+  var leafW = leafH * interp.aspect;
+
+  var cx = padL + stageW / 2;
+  var cy = topClear + (stageH - BARS_H) / 2;
+  var t = performance.now() / 1000;
+
+  /* Paused, show the day we are on exactly; playing, show how far between
+     yesterday and today the transport has got. This is what turns ~30 stepped
+     images into a continuous slide, and it is why the doubled substeps are
+     worth paying for — at 6 the glide would quantise straight back onto the
+     same handful of composites it was gliding between. */
+  var tDay = playing ? Math.max(0, Math.min(1, acc)) : 1;
+
+  /* That same fraction as a day number. sim.doy is the day just stepped onto
+     and the frame is drawing the way from the one before it, so the picture
+     stands at doy - 1 + tDay. Anything animated off simulated time reads this
+     and not the integer, or it moves in whole-day jumps. */
+  var dayNow = sim.doy - 1 + tDay;
+
+  shownCC = {
+    cx: prevCC.cx + (curCC.cx - prevCC.cx) * tDay,
+    cy: prevCC.cy + (curCC.cy - prevCC.cy) * tDay
+  };
+
+  /* A fallen leaf sinks and tips over. The model decided it fell; this only
+     decides where a fallen thing sits on the page. Measured off the integer
+     doy the six-day fall was six frames of animation, however fast the
+     transport ran — same easing, sampled continuously. */
+  var sinceFall = leaf.attached ? 0
+                : Math.max(0, Math.min(1, (dayNow - leaf.fellOnDoy) / FALL_DAYS));
+  var ease = sinceFall * sinceFall * (3 - 2 * sinceFall);
+  var y = cy + ease * FALL_DROP;
+  /* The sway damps out as it goes instead of being cut dead at the moment of
+     detachment, which was a hitch of its own at the top of the fall. */
+  var rot = ease * 0.5 + (1 - ease) * Math.sin(t * 0.6) * 0.014;
+  var w = leafW * (1 - 0.12 * ease);
+
+  var img = flat ? interp.flat(M.leafColor(leaf)) : interp.atCell(shownCC.cx, shownCC.cy);
+
+  ctx.globalAlpha = 1 - 0.40 * ease;
+  interp.draw(ctx, img, cx, y, w, rot);
+  ctx.globalAlpha = 1;
+
+  if (barsOn) drawBars(cx, cy + leafH / 2 + 26, leaf);
+
+  if (el('gridmap').classList.contains('open')) drawMap();
+
+  if (el('perf').classList.contains('open')) {
+    el('perf').textContent =
+      'composite ' + interp.stats.lastMs.toFixed(1) + ' ms · cache ' +
+      interp.cacheSize() + '/' + interp.cacheMax + ' · ' +
+      interp.stats.hits + ' hit / ' + interp.stats.misses + ' miss · ' +
+      interp.px + 'px @ ' + G.COLS + '×' + G.rowsOf(SPECIES) +
+      ' · ' + interp.substeps + ' substeps';
+  }
+}
+
+/* Pigment bars — the four numbers the grid axes are computed from. Off by
+   default; with one leaf there is room to draw them properly, with the value
+   spelled out rather than implied by a 60px sliver. */
+function drawBars(cx, top, leaf) {
+  var bars = [
+    ['chlorophyll', leaf.chlorophyll, '#5f9e4a'],
+    ['carotenoid',  leaf.carotenoid,  '#d8b13a'],
+    ['anthocyanin', leaf.anthocyanin, '#b8474a'],
+    ['tannin',      leaf.tannin,      '#8a6a45']
+  ];
+  var bw = 150, bh = 5, step = 17, labelW = 78, valW = 40;
+  var x0 = cx - (labelW + bw + valW) / 2;
+  var bx = x0 + labelW;
+
+  ctx.textBaseline = 'middle';
+  for (var i = 0; i < bars.length; i++) {
+    var by = top + i * step;
+    var v = Math.max(0, Math.min(1, bars[i][1]));
+
+    ctx.font = '10.5px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(169,153,138,.85)';
+    ctx.fillText(bars[i][0], bx - 10, by + bh / 2);
+
+    ctx.fillStyle = 'rgba(255,255,255,.08)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = bars[i][2];
+    ctx.fillRect(bx, by, bw * v, bh);
+
+    ctx.font = '10.5px ui-monospace, Consolas, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(169,153,138,.75)';
+    ctx.fillText(v.toFixed(2), bx + bw + 10, by + bh / 2);
+  }
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'center';
+}
+
+/* ------------------------------------------------- the grid position map */
+var mapc = el('mapc'), mctx = mapc.getContext('2d');
+var MAP_CELLS = (function () {
+  var rows = G.rowsOf(SPECIES), out = [];
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < G.COLS; c++) {
+      out.push({ c: c, r: r, hex: G.cellColor(SPECIES, G.xAt(c), G.yAt(SPECIES, r)) });
+    }
+  }
+  return out;
+})();
+
+function drawMap() {
+  var W = mapc.width, H = mapc.height, rows = G.rowsOf(SPECIES), cols = G.COLS;
+  var cw = W / cols, ch = H / rows;
+  mctx.clearRect(0, 0, W, H);
+
+  for (var i = 0; i < MAP_CELLS.length; i++) {
+    var m = MAP_CELLS[i];
+    mctx.fillStyle = m.hex;
+    /* Row 0 is y = 0 and belongs at the BOTTOM — the same orientation the
+       README's tables and the contact sheet use. */
+    mctx.fillRect(m.c * cw, H - (m.r + 1) * ch, cw + 0.5, ch + 0.5);
+  }
+
+  mctx.strokeStyle = 'rgba(0,0,0,.22)';
+  mctx.lineWidth = 1;
+  for (var c = 1; c < cols; c++) {
+    mctx.beginPath(); mctx.moveTo(c * cw, 0); mctx.lineTo(c * cw, H); mctx.stroke();
+  }
+  for (var r = 1; r < rows; r++) {
+    mctx.beginPath(); mctx.moveTo(0, r * ch); mctx.lineTo(W, r * ch); mctx.stroke();
+  }
+
+  var leaf = sim.leaves[0];
+  var cc = shownCC || interp.coordsOf(leaf);
+  var px = (cc.cx + 0.5) * cw;
+  var py = H - (cc.cy + 0.5) * ch;
+
+  /* The quad actually being blended, so the bilinear lookup is visible. */
+  var c0 = Math.max(0, Math.min(cols - 2, Math.floor(cc.cx)));
+  var r0 = Math.max(0, Math.min(rows - 2, Math.floor(cc.cy)));
+  mctx.strokeStyle = 'rgba(255,255,255,.30)';
+  mctx.lineWidth = 1.5;
+  mctx.strokeRect(c0 * cw + 0.75, H - (r0 + 2) * ch + 0.75, cw * 2 - 1.5, ch * 2 - 1.5);
+
+  mctx.beginPath();
+  mctx.arc(px, py, 7, 0, Math.PI * 2);
+  mctx.fillStyle = leaf.attached ? '#fff' : 'rgba(255,255,255,.35)';
+  mctx.fill();
+  mctx.lineWidth = 2;
+  mctx.strokeStyle = 'rgba(0,0,0,.55)';
+  mctx.stroke();
+
+  var ax = G.axesOf(leaf);
+  el('axX').textContent = ax.x.toFixed(2);
+  el('axY').textContent = ax.yDefined ? ax.y.toFixed(2) : '—';
+}
+
+/* ------------------------------------------------------------------- hud */
+function refreshHud() {
+  var e = sim.env, leaf = sim.leaves[0];
+  el('oDate').textContent = M.doyToLabel(sim.doy);
+  el('oDay').textContent = 'day ' + sim.day + ' / ' + M.SEASON_DAYS;
+  el('oTmin').textContent = e.tMin.toFixed(1) + ' °C';
+  el('oLen').textContent = e.dayLength.toFixed(2) + ' h';
+  el('oSun').textContent = e.swMeanWm2 + ' W/m²';
+  el('oGust').textContent = e.gust.toFixed(1) + ' m/s';
+  el('oPrecip').textContent = e.rain < 0.05 ? 'none' : e.rain.toFixed(1) + ' mm';
+  el('oFrost').innerHTML = e.hardFreeze
+    ? '<span class="badge freeze">HARD FREEZE</span>'
+    : e.lightFrost ? '<span class="badge frost">frost</span>'
+                   : '<span class="badge none">clear</span>';
+  el('oHeld').innerHTML = leaf.attached
+    ? '<span class="badge held">held</span>'
+    : '<span class="badge fallen">fell ' + M.doyToLabel(leaf.fellOnDoy) + '</span>';
+
+  var pct = (100 * sim.day / M.SEASON_DAYS).toFixed(1) + '%';
+  el('progFill').style.width = pct;
+  el('seasonFill').style.width = pct;
+}
+
+/* -------------------------------------------------------------- controls */
+var ctlIds = ['temp', 'winterPrecip', 'cloud', 'wind', 'precip', 'lat'];
+
+function labels() {
+  var tv = parseFloat(el('temp').value);
+  el('tempV').textContent = (tv >= 0 ? '+' : '') + tv.toFixed(1) + ' °C';
+  el('cloudV').textContent = el('cloud').value + ' %';
+  el('windV').textContent = parseFloat(el('wind').value).toFixed(1) + ' m/s';
+  el('precipV').textContent = parseFloat(el('precip').value).toFixed(2) + ' ×';
+  el('winterPrecipV').textContent = parseFloat(el('winterPrecip').value).toFixed(2) + ' ×';
+  el('latV').textContent = parseFloat(el('lat').value).toFixed(1) + ' °N';
+  el('speedV').textContent = parseFloat(el('speed').value).toFixed(2) + '×';
+}
+
+ctlIds.forEach(function (id) {
+  el(id).addEventListener('input', function () {
+    labels();
+    if (!sim) return;
+    pushControls();
+    /* Before the season opens, re-seed day 0 so daylength answers the new
+       latitude straight away rather than on the first step. */
+    if (sim.day === 0) {
+      sim.env = M.makeEnvironment(sim.doy, sim.controls, M.makeRng(sim.seed ^ 0xC2B2AE35));
+      refreshHud();
+    }
+  });
+});
+el('speed').addEventListener('input', labels);
+
+function setPlaying(v) {
+  /* Resuming starts the glide from where the paused frame actually sat, so
+     play never rewinds by the day it had not finished crossing. */
+  if (v && !playing) { prevCC = curCC; acc = 0; }
+  playing = v;
+  el('play').textContent = v ? 'Pause' : 'Play';
+}
+function stepOne() {
+  var wasAt = curCC;
+  if (!sim.step()) return;
+  prevCC = wasAt;
+  markCoords(false);
+  refreshHud();
+}
+
+/* One function owns every optional surface, so a checkbox, a keystroke and a
+   query parameter all reach the same place. */
+function syncToggles() {
+  el('gridmap').classList.toggle('open', el('showMap').checked);
+  el('perf').classList.toggle('open', el('showPerf').checked);
+}
+['showBars', 'showMap', 'showFlat', 'showPerf'].forEach(function (id) {
+  el(id).addEventListener('change', syncToggles);
+});
+
+el('play').addEventListener('click', function () { setPlaying(!playing); });
+el('stepBtn').addEventListener('click', function () { setPlaying(false); stepOne(); });
+el('replay').addEventListener('click', function () { acc = 0; buildSim(sim.seed); setPlaying(true); });
+el('reseed').addEventListener('click', function () {
+  acc = 0;
+  buildSim((sim.seed * 1664525 + 1013904223) >>> 0);
+  setPlaying(true);
+});
+el('cfg').addEventListener('click', function () {
+  el('cfg').classList.toggle('on', el('panel').classList.toggle('open'));
+});
+
+function flip(id) { el(id).checked = !el(id).checked; syncToggles(); }
+
+document.addEventListener('keydown', function (ev) {
+  if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return;
+  if (ev.code === 'Space') { ev.preventDefault(); setPlaying(!playing); }
+  else if (ev.code === 'ArrowRight') { ev.preventDefault(); setPlaying(false); stepOne(); }
+  else if (ev.code === 'KeyC') el('cfg').click();
+  else if (ev.code === 'KeyB') flip('showBars');
+  else if (ev.code === 'KeyG') flip('showMap');
+  else if (ev.code === 'KeyF') flip('showFlat');
+});
+
+function resize() {
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  var rect = cv.getBoundingClientRect();
+  cv.width = Math.round(rect.width * dpr);
+  cv.height = Math.round(rect.height * dpr);
+}
+</script>
+</body>
+</html>

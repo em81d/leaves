@@ -47,8 +47,11 @@
   var WORK_PX = 512;
 
   /* Sub-steps per cell interval when quantising (x, y) for the cache. Six
-   * across a cell is finer than the eye tracks on a colour ramp, and keeps the
-   * key space small enough that a season replays mostly out of cache. */
+   * across a cell keeps the key space small enough that a season replays
+   * mostly out of cache, and at four leaves on screen the steps read as one
+   * ramp. Blown up to a single leaf filling the stage they do not — pass
+   * `substeps` to load() for that case; the cost is a proportionally larger
+   * key space, so raise `cacheMax` with it. */
   var SUBSTEPS = 6;
 
   /* Composited canvases held before the least recently used is dropped. At
@@ -76,6 +79,8 @@
     opts = opts || {};
     var species = opts.species || 'bigtoothMaple';
     var px = opts.px || WORK_PX;
+    var substeps = opts.substeps || SUBSTEPS;
+    var cacheMax = opts.cacheMax || CACHE_MAX;
     var dir = opts.dir || ('cells/' + species + '/');
     var onProgress = opts.onProgress || function () {};
 
@@ -126,6 +131,7 @@
 
       return makeInterp({
         species: species, px: px, cols: cols, rows: rows,
+        substeps: substeps, cacheMax: cacheMax,
         cell: byName, alpha: alpha, aspect: aspect, G: G
       });
     });
@@ -168,8 +174,8 @@
      * coordinates, not (x, y) in [0,1] — cellCoords has already applied the
      * species' y ceiling, which is the thing it would be easy to forget. */
     function atCell(cx, cy) {
-      var qx = Math.round(cx * SUBSTEPS) / SUBSTEPS;
-      var qy = Math.round(cy * SUBSTEPS) / SUBSTEPS;
+      var qx = Math.round(cx * S.substeps) / S.substeps;
+      var qy = Math.round(cy * S.substeps) / S.substeps;
       var key = qx + '|' + qy;
 
       var hit = cache.get(key);
@@ -185,7 +191,7 @@
       stats.lastMs = (root.performance || Date).now() - t0;
 
       cache.set(key, canvas);
-      if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+      if (cache.size > S.cacheMax) cache.delete(cache.keys().next().value);
       return canvas;
     }
 
@@ -261,6 +267,8 @@
     return {
       species: S.species,
       px: px,
+      substeps: S.substeps,
+      cacheMax: S.cacheMax,
       aspect: S.aspect,
       stats: stats,
       flat: flat,
